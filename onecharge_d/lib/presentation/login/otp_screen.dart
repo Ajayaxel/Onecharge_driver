@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:onecharge_d/presentation/home/home_screen.dart';
+import 'package:onecharge_d/presentation/service/service_request_screen.dart';
 import 'package:onecharge_d/widgets/reusable_button.dart';
 import 'dart:async';
 
@@ -182,7 +183,7 @@ class _OtpScreenState extends State<OtpScreen> {
                     ReusableButton(
                       text: 'Continue',
                       onPressed: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => HomeScreen()));
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => ServiceRequestScreen()));
                         // Handle OTP verification
                       },
                     ),
