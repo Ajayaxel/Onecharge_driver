@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:onecharge_d/core/models/ticket.dart';
 import 'package:onecharge_d/core/models/work_time.dart';
-import 'package:onecharge_d/presentation/home/home_screen.dart';
+import 'package:onecharge_d/presentation/main_navigation_screen.dart';
 
 class TaskCompletionScreen extends StatelessWidget {
   final Ticket ticket;
@@ -118,10 +118,10 @@ class TaskCompletionScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    // Navigate back to home and clear the navigation stack
+                    // Navigate to bottom navigation first index page and clear the navigation stack
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(
-                        builder: (context) => const HomeScreen(),
+                        builder: (context) => const MainNavigationScreen(),
                       ),
                       (route) => false,
                     );

@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:onecharge_d/core/models/select_vehicle_request.dart';
 import 'package:onecharge_d/core/models/ticket.dart';
+import 'package:onecharge_d/core/models/vehicle.dart';
+import 'package:onecharge_d/core/services/background_location_service.dart';
+import 'package:onecharge_d/presentation/home/bloc/vehicle_bloc.dart';
+import 'package:onecharge_d/presentation/home/bloc/vehicle_event.dart';
+import 'package:onecharge_d/presentation/home/bloc/vehicle_state.dart';
+import 'package:onecharge_d/presentation/home/vehicle_drop_off_bottom_sheet.dart';
 import 'package:onecharge_d/presentation/service/bloc/ticket_bloc.dart';
 import 'package:onecharge_d/presentation/service/bloc/ticket_event.dart';
 import 'package:onecharge_d/presentation/service/bloc/ticket_state.dart';
 import 'package:onecharge_d/presentation/service/service_request_screen.dart';
-import 'package:onecharge_d/presentation/service/ticket_details_screen.dart';
+import 'package:onecharge_d/presentation/map/nearby_drivers_map_screen.dart';
+import 'package:onecharge_d/widgets/reusable_button.dart';
+import 'package:onecharge_d/widgets/ticket_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,223 +24,825 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  int? _selectedVehicleId;
+  final TextEditingController _vehicleNumberController = TextEditingController();
+  String? _errorMessage;
+  final BackgroundLocationService _locationService = BackgroundLocationService();
+
   @override
   void initState() {
     super.initState();
-    // Fetch tickets when screen loads
+    // Fetch tickets and vehicles when screen loads
     context.read<TicketBloc>().add(const FetchTickets());
+    context.read<VehicleBloc>().add(const FetchVehicles());
+  }
+
+  @override
+  void dispose() {
+    _vehicleNumberController.dispose();
+    super.dispose();
+  }
+
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) {
+      return 'Good Morning';
+    } else if (hour < 17) {
+      return 'Good Afternoon';
+    } else {
+      return 'Good Evening';
+    }
+  }
+
+  String _getFormattedDate() {
+    final now = DateTime.now();
+    final months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    return '${weekdays[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}';
+  }
+
+  int _getTodayCompletedCount(List<Ticket> completedTickets) {
+    final today = DateTime.now();
+    return completedTickets.where((ticket) {
+      try {
+        final date = DateTime.parse(ticket.createdAt);
+        return date.year == today.year &&
+            date.month == today.month &&
+            date.day == today.day;
+      } catch (e) {
+        return false;
+      }
+    }).length;
+  }
+
+  /// Check if driver has an active task (assigned or in_progress)
+  bool _hasActiveTask(List<Ticket> tickets) {
+    return tickets.any((ticket) => 
+      ticket.status == 'assigned' || ticket.status == 'in_progress'
+    );
+  }
+
+  /// Get count of active tasks
+  int _getActiveTaskCount(List<Ticket> tickets) {
+    return tickets.where((ticket) => 
+      ticket.status == 'assigned' || ticket.status == 'in_progress'
+    ).length;
+  }
+
+  /// Check if driver completed daily work (no active tasks)
+  bool _hasCompletedDailyWork(List<Ticket> tickets) {
+    return !_hasActiveTask(tickets);
+  }
+
+  /// Show drop-off bottom sheet for vehicle return
+  void _showDropOffBottomSheet(BuildContext context, Vehicle vehicle) {
+    // Check if driver has completed daily work (no active tasks)
+    final ticketState = context.read<TicketBloc>().state;
+    bool canReturnVehicle = false;
+    
+    if (ticketState is TicketLoaded) {
+      canReturnVehicle = _hasCompletedDailyWork(ticketState.tickets);
+    }
+    
+    // Show bottom sheet only if:
+    // 1. Vehicle is inactive AND currently running (has driver assigned), OR
+    // 2. Driver has completed daily work (no active tasks)
+    if (canReturnVehicle || vehicle.driver != null) {
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => VehicleDropOffBottomSheet(vehicle: vehicle),
+      );
+    } else {
+      // Show message if driver still has active tasks
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please complete all active tasks before returning the vehicle'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: BlocConsumer<TicketBloc, TicketState>(
-        listener: (context, state) {
-          if (state is TicketError) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(state.message),
-                backgroundColor: Colors.black,
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
-        },
-        builder: (context, state) {
-          if (state is TicketLoading) {
-            return const Center(
-              child: CircularProgressIndicator(
+      backgroundColor: const Color(0xFFF8F9FA),
+      body: SafeArea(
+        child: BlocConsumer<TicketBloc, TicketState>(
+          listener: (context, state) {
+            if (state is TicketError) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(state.message),
+                  backgroundColor: Colors.black,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          },
+          builder: (context, state) {
+            if (state is TicketLoading) {
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.black),
+              );
+            }
+
+            if (state is TicketError) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Error: ${state.message}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.black,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        context.read<TicketBloc>().add(const FetchTickets());
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            if (state is TicketLoaded) {
+              final tickets = state.tickets;
+              final pendingTickets = tickets
+                  .where((t) => t.status != 'completed')
+                  .toList();
+              final completedTickets = tickets
+                  .where((t) => t.status == 'completed')
+                  .toList();
+              final todayCompleted = _getTodayCompletedCount(completedTickets);
+              final hasActiveTask = _hasActiveTask(tickets);
+              final activeTaskCount = _getActiveTaskCount(tickets);
+
+              return RefreshIndicator(
+                onRefresh: () async {
+                  context.read<TicketBloc>().add(const FetchTickets());
+                },
                 color: Colors.black,
-              ),
-            );
-          }
-
-          if (state is TicketError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: Colors.black,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Error: ${state.message}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.black,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () {
-                      context.read<TicketBloc>().add(const FetchTickets());
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          if (state is TicketLoaded) {
-            final tickets = state.tickets;
-            final pendingTickets = tickets.where((t) => t.status != 'completed').toList();
-            final completedTickets = tickets.where((t) => t.status == 'completed').toList();
-
-            return RefreshIndicator(
-              onRefresh: () async {
-                context.read<TicketBloc>().add(const FetchTickets());
-              },
-              color: Colors.black,
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  // Custom App Bar
-                  SliverAppBar(
-                    expandedHeight: 120,
-                    floating: false,
-                    pinned: true,
-                    backgroundColor: Colors.white,
-                    elevation: 0,
-                    flexibleSpace: FlexibleSpaceBar(
-                      centerTitle: false,
-                      titlePadding: const EdgeInsets.only(
-                        left: 20,
-                        bottom: 16,
-                        right: 20,
-                      ),
-                      title: const Text(
-                        'Onecharge Driver',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ),
-                    actions: [
-                      IconButton(
-                        icon: const Icon(
-                          Icons.refresh,
-                          color: Colors.black,
-                        ),
-                        onPressed: () {
-                          context.read<TicketBloc>().add(const FetchTickets());
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ),
-
-                  // Statistics Cards
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _StatCard(
-                              title: 'Pending',
-                              count: pendingTickets.length,
-                              icon: Icons.pending_actions,
-                              color: Colors.black,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _StatCard(
-                              title: 'Completed',
-                              count: completedTickets.length,
-                              icon: Icons.check_circle_outline,
-                              color: const Color(0xFF0E7B00),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // Pending Work Section
-                  if (pendingTickets.isNotEmpty)
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    // Header Section
                     SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-                        child: Row(
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: 4,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: Colors.black,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            const Text(
-                              'Pending Work',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black,
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${pendingTickets.length}',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                                Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _getGreeting(),
+                                        style: const TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black,
+                                          letterSpacing: -0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _getFormattedDate(),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey.shade600,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_errorMessage != null)
+                                      Flexible(
+                                        child: Container(
+                                          margin: const EdgeInsets.only(right: 8),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8,
+                                          ),
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 200,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red,
+                                            borderRadius: BorderRadius.circular(8),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.1),
+                                                blurRadius: 4,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.error_outline,
+                                                color: Colors.white,
+                                                size: 16,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Flexible(
+                                                child: Text(
+                                                  _errorMessage!,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.05),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: IconButton(
+                                        icon: const Icon(
+                                          Icons.refresh_rounded,
+                                          color: Colors.black,
+                                        ),
+                                        onPressed: () {
+                                          context.read<TicketBloc>().add(
+                                            const FetchTickets(),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ),
                     ),
 
-                  // Pending Tickets List
-                  if (pendingTickets.isNotEmpty)
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
+                    // Availability Status Card (One Task Per Driver)
+                    if (hasActiveTask)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF4E6),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFFFA500),
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFA500).withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.info_outline_rounded,
+                                    color: Color(0xFFFFA500),
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Active Task Limit Reached',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFFFFA500),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'You have $activeTaskCount active task${activeTaskCount > 1 ? 's' : ''}. Complete it to receive new assignments.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade700,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    // Statistics Cards ui....
+
+                    // Today's Summary Card
+                    if (completedTickets.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.05),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.today_rounded,
+                                    color: Colors.black,
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Today\'s Summary',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade600,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$todayCompleted tasks completed today',
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Driver details UI
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(height: 10),
+                            const Text(
+                              "Service Vehicle Type",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            BlocBuilder<VehicleBloc, VehicleState>(
+                              builder: (context, vehicleState) {
+                                if (vehicleState is VehicleLoading) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(20.0),
+                                      child: CircularProgressIndicator(
+                                        color: Colors.black,
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                if (vehicleState is VehicleError) {
+                                  return Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(20.0),
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            'Error loading vehicles: ${vehicleState.message}',
+                                            style: const TextStyle(
+                                              color: Colors.red,
+                                              fontSize: 14,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          const SizedBox(height: 10),
+                                          ElevatedButton(
+                                            onPressed: () {
+                                              context
+                                                  .read<VehicleBloc>()
+                                                  .add(const FetchVehicles());
+                                            },
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.black,
+                                              foregroundColor: Colors.white,
+                                            ),
+                                            child: const Text('Retry'),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                List<Vehicle> vehicles = [];
+                                bool isLoading = false;
+
+                                if (vehicleState is VehicleLoaded) {
+                                  vehicles = vehicleState.vehicles;
+                                } else if (vehicleState is VehicleSelecting) {
+                                  vehicles = vehicleState.vehicles;
+                                  isLoading = true;
+                                } else if (vehicleState is VehicleSelectError) {
+                                  vehicles = vehicleState.vehicles;
+                                } else if (vehicleState is VehicleSelected) {
+                                  vehicles = vehicleState.vehicles;
+                                }
+
+                                if (vehicles.isEmpty && vehicleState is! VehicleLoading) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(20.0),
+                                      child: Text(
+                                        'No vehicles available',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                if (vehicles.isNotEmpty) {
+                                  return Stack(
+                                    children: [
+                                      GridView.builder(
+                                        itemCount: vehicles.length,
+                                        shrinkWrap: true,
+                                        physics: const NeverScrollableScrollPhysics(),
+                                        gridDelegate:
+                                            const SliverGridDelegateWithFixedCrossAxisCount(
+                                              crossAxisCount: 3,
+                                              crossAxisSpacing: 12,
+                                              mainAxisSpacing: 12,
+                                              childAspectRatio: 108 / 102,
+                                            ),
+                                        itemBuilder: (context, index) {
+                                          final vehicle = vehicles[index];
+                                          final isSelected = _selectedVehicleId == vehicle.id;
+                                          
+                                          // Check if this is the currently running vehicle
+                                          // A vehicle is "currently running" if it has a driver assigned
+                                          final isCurrentlyRunning = vehicle.driver != null;
+                                          
+                                          return GestureDetector(
+                                            onTap: isLoading
+                                                ? null
+                                                : () {
+                                                    // If vehicle is inactive and currently running, show drop-off bottom sheet
+                                                    if (!vehicle.isActive && isCurrentlyRunning) {
+                                                      _showDropOffBottomSheet(context, vehicle);
+                                                    } else if (!vehicle.isActive) {
+                                                      // Inactive but not currently running - just select it
+                                                      setState(() {
+                                                        _selectedVehicleId = isSelected ? null : vehicle.id;
+                                                      });
+                                                    } else {
+                                                      // Active vehicle - normal selection
+                                                      setState(() {
+                                                        _selectedVehicleId = isSelected ? null : vehicle.id;
+                                                      });
+                                                    }
+                                                  },
+                                            child: Opacity(
+                                              opacity: isLoading ? 0.6 : 1.0,
+                                              child: _buildVehicleCard(
+                                                vehicle.image,
+                                                vehicle.driverVehicleType?.name ?? 'N/A',
+                                                vehicle.isActive,
+                                                isSelected,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      if (isLoading)
+                                        Positioned.fill(
+                                          child: Container(
+                                            color: Colors.white.withOpacity(0.3),
+                                            child: const Center(
+                                              child: CircularProgressIndicator(
+                                                color: Colors.black,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  );
+                                }
+
+                                return const SizedBox.shrink();
+                              },
+                            ),
+                            SizedBox(height: 20),
+                            TextField(
+                              controller: _vehicleNumberController,
+                              decoration: InputDecoration(
+                                hintText: 'Enter your vehicle number',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade400,
+                                    width: 1,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade400,
+                                    width: 1,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: Colors.black,
+                                    width: 2,
+                                  ),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 16,
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: 20),
+                            BlocConsumer<VehicleBloc, VehicleState>(
+                              listener: (context, state) {
+                                if (state is VehicleSelected) {
+                                  setState(() {
+                                    _errorMessage = null;
+                                  });
+                                  
+                                  // Start location tracking after vehicle selection
+                                  // This ensures driver location is updated for auto-assignment
+                                  _locationService.start().then((success) {
+                                    if (success) {
+                                      print('✅ Location tracking started after vehicle selection');
+                                    } else {
+                                      print('⚠️ Failed to start location tracking');
+                                    }
+                                  });
+                                  
+                                  // Navigate to next screen after successful selection
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ServiceRequestScreen(),
+                                    ),
+                                  );
+                                } else if (state is VehicleSelectError) {
+                                  setState(() {
+                                    _errorMessage = state.message;
+                                  });
+                                  // Clear error after 5 seconds
+                                  Future.delayed(const Duration(seconds: 5), () {
+                                    if (mounted) {
+                                      setState(() {
+                                        _errorMessage = null;
+                                      });
+                                    }
+                                  });
+                                }
+                              },
+                              builder: (context, state) {
+                                final isSelecting = state is VehicleSelecting;
+                                return ReusableButton(
+                                  text: isSelecting ? 'Selecting...' : 'Save Details',
+                                  onPressed: isSelecting
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            _errorMessage = null;
+                                          });
+
+                                          if (_selectedVehicleId == null) {
+                                            setState(() {
+                                              _errorMessage = 'Please select a vehicle';
+                                            });
+                                            return;
+                                          }
+
+                                          if (_vehicleNumberController
+                                                  .text.isEmpty) {
+                                            setState(() {
+                                              _errorMessage = 'Please enter vehicle number';
+                                            });
+                                            return;
+                                          }
+
+                                          context.read<VehicleBloc>().add(
+                                                SelectVehicle(
+                                                  vehicleId: _selectedVehicleId!,
+                                                  request:
+                                                      SelectVehicleRequest(
+                                                    vehicleNumber:
+                                                        _vehicleNumberController
+                                                            .text,
+                                                  ),
+                                                ),
+                                              );
+                                        },
+                                );
+                              },
+                            ),
+                            SizedBox(height: 20),
+                            ReusableButton(
+                              text: 'See nearby drivers & cars',
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const NearbyDriversMapScreen(),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Pending Work Section
+                    if (pendingTickets.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 4,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFF6B6B),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              const Text(
+                                'Pending Work',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFF6B6B),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '${pendingTickets.length}',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // Pending Tickets List
+                    if (pendingTickets.isNotEmpty)
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate((context, index) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
+                              horizontal: 20,
                               vertical: 6,
                             ),
                             child: TicketCard(
@@ -240,514 +851,128 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => const ServiceRequestScreen(),
+                                    builder: (context) =>
+                                        const ServiceRequestScreen(),
                                   ),
                                 );
                               },
                             ),
                           );
-                        },
-                        childCount: pendingTickets.length,
+                        }, childCount: pendingTickets.length),
                       ),
-                    ),
 
-                  // Completed Tasks Section
-                  if (completedTickets.isNotEmpty)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 4,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0E7B00),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            const Text(
-                              'Completed Tasks',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black,
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0E7B00),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${completedTickets.length}',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                    // Empty State
+                    if (pendingTickets.isEmpty)
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: SizedBox.shrink(),
                       ),
-                    ),
 
-                  // Completed Tickets List
-                  if (completedTickets.isNotEmpty)
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 4,
-                            ),
-                            child: TicketCard(
-                              ticket: completedTickets[index],
-                              isCompleted: true,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => TicketDetailsScreen(
-                                      ticket: completedTickets[index],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                        childCount: completedTickets.length,
-                      ),
-                    ),
+                    // Bottom padding
+                    const SliverToBoxAdapter(child: SizedBox(height: 24)),
+                  ],
+                ),
+              );
+            }
 
-                  // Empty State
-                  if (pendingTickets.isEmpty && completedTickets.isEmpty)
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.assignment_outlined,
-                                size: 64,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            const Text(
-                              'No tickets available',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Pull down to refresh',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                  // Bottom padding
-                  const SliverToBoxAdapter(
-                    child: SizedBox(height: 24),
-                  ),
-                ],
-              ),
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.black),
             );
-          }
-
-          return const Center(
-            child: CircularProgressIndicator(
-              color: Colors.black,
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }
-}
 
-class _StatCard extends StatelessWidget {
-  final String title;
-  final int count;
-  final IconData icon;
-  final Color color;
-
-  const _StatCard({
-    required this.title,
-    required this.count,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildVehicleCard(
+      String imageUrl, String vehicleType, bool isActive, bool isSelected) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      height: 102,
+      width: 108,
       decoration: BoxDecoration(
-        color: Colors.white,
+        border: Border.all(
+          color: isSelected ? Colors.black : Colors.grey.shade400,
+          width: isSelected ? 2 : 1,
+        ),
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: isSelected ? Colors.black.withOpacity(0.05) : Colors.transparent,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  icon,
-                  color: color,
-                  size: 20,
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Center(
+                child: imageUrl.isNotEmpty
+                    ? Image.network(
+                        imageUrl,
+                        fit: BoxFit.contain,
+                        height: 28,
+                        width: 60,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Icon(
+                            Icons.directions_car,
+                            size: 28,
+                            color: Colors.grey.shade400,
+                          );
+                        },
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return SizedBox(
+                            height: 28,
+                            width: 28,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded /
+                                      loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          );
+                        },
+                      )
+                    : Icon(
+                        Icons.directions_car,
+                        size: 28,
+                        color: Colors.grey.shade400,
+                      ),
               ),
-              Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey.shade700,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class TicketCard extends StatelessWidget {
-  final Ticket ticket;
-  final bool isCompleted;
-  final VoidCallback onTap;
-
-  const TicketCard({
-    super.key,
-    required this.ticket,
-    this.isCompleted = false,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final greenColor = const Color(0xFF0E7B00);
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 8),
+            Text(
+              vehicleType,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Header Row with Ticket ID and Status
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            ticket.ticketId,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _formatDate(ticket.createdAt),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isCompleted
-                            ? greenColor
-                            : Colors.black,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 5,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            isCompleted ? 'Completed' : 'Pending',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                
-                // Divider
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: Colors.grey.shade200,
-                ),
-                const SizedBox(height: 10),
-                
-                // Customer Info
-                _InfoRow(
-                  icon: Icons.person_outline,
-                  label: 'Customer',
-                  value: ticket.customer.name,
-                ),
-                const SizedBox(height: 8),
-                
-                // Issue Category
-                _InfoRow(
-                  icon: Icons.build_outlined,
-                  label: 'Issue',
-                  value: ticket.issueCategory.name,
-                ),
-                const SizedBox(height: 8),
-                
-                // Vehicle Info Row
-                Row(
-                  children: [
-                    Expanded(
-                      child: _InfoRow(
-                        icon: Icons.directions_car_outlined,
-                        label: 'Vehicle',
-                        value: '${ticket.brand.name} ${ticket.model.name}',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoRow(
-                        icon: Icons.confirmation_number_outlined,
-                        label: 'Plate',
-                        value: ticket.numberPlate,
-                        valueStyle: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                
-                // Location
-                if (ticket.location.isNotEmpty)
-                  _InfoRow(
-                    icon: Icons.location_on_outlined,
-                    label: 'Location',
-                    value: ticket.location,
-                    maxLines: 2,
+                Text(
+                  isActive ? 'Active' : 'Inactive',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w500,
                   ),
-                
-                // Work Time (if available and completed)
-                if (ticket.workTime != null && isCompleted) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: greenColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.access_time,
-                          size: 16,
-                          color: greenColor,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Work Time: ${ticket.workTime!.calculatedFormattedTime}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: greenColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.circle,
+                  size: 14,
+                  color: isActive ? Colors.green : Colors.red,
+                ),
               ],
             ),
-          ),
+          ],
         ),
       ),
-    );
-  }
-
-  String _formatDate(String dateString) {
-    try {
-      final date = DateTime.parse(dateString);
-      final now = DateTime.now();
-      final difference = now.difference(date);
-
-      if (difference.inDays == 0) {
-        if (difference.inHours == 0) {
-          return '${difference.inMinutes}m ago';
-        }
-        return '${difference.inHours}h ago';
-      } else if (difference.inDays == 1) {
-        return 'Yesterday';
-      } else if (difference.inDays < 7) {
-        return '${difference.inDays}d ago';
-      } else {
-        return '${date.day}/${date.month}/${date.year}';
-      }
-    } catch (e) {
-      return dateString;
-    }
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final TextStyle? valueStyle;
-  final int maxLines;
-
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.valueStyle,
-    this.maxLines = 1,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(5),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Icon(
-            icon,
-            size: 14,
-            color: Colors.black,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: valueStyle ??
-                    const TextStyle(
-                      fontSize: 13,
-                      color: Colors.black,
-                      fontWeight: FontWeight.w500,
-                    ),
-                maxLines: maxLines,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

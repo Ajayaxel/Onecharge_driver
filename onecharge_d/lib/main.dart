@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:onecharge_d/core/repository/auth_repository.dart';
 import 'package:onecharge_d/core/repository/ticket_repository.dart';
+import 'package:onecharge_d/core/repository/vehicle_repository.dart';
+import 'package:onecharge_d/presentation/home/bloc/vehicle_bloc.dart';
 import 'package:onecharge_d/presentation/login/bloc/login_bloc.dart';
+import 'package:onecharge_d/presentation/profile/bloc/profile_bloc.dart';
 import 'package:onecharge_d/presentation/service/bloc/ticket_bloc.dart';
 import 'package:onecharge_d/presentation/splash/splash_screen.dart';
 
@@ -26,6 +29,16 @@ class MyApp extends StatelessWidget {
         BlocProvider<TicketBloc>(
           create: (context) => TicketBloc(
             ticketRepository: TicketRepository(),
+          ),
+        ),
+        BlocProvider<ProfileBloc>(
+          create: (context) => ProfileBloc(
+            authRepository: AuthRepository(), 
+          ),
+        ),
+        BlocProvider<VehicleBloc>(
+          create: (context) => VehicleBloc(
+            vehicleRepository: VehicleRepository(),
           ),
         ),
       ],

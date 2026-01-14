@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:onecharge_d/core/storage/token_storage.dart';
-import 'package:onecharge_d/presentation/home/home_screen.dart';
+import 'package:onecharge_d/presentation/main_navigation_screen.dart';
 import 'package:onecharge_d/presentation/login/login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -30,7 +30,7 @@ class _SplashScreenState extends State<SplashScreen> {
     if (isLoggedIn) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
+        MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
       );
     } else {
       Navigator.pushReplacement(

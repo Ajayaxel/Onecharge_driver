@@ -12,7 +12,7 @@ class TicketDetailsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final greenColor = const Color(0xFF0E7B00);
+    final blackColor = Colors.black;
     
     return Scaffold(
       backgroundColor: Colors.white,
@@ -27,7 +27,7 @@ class TicketDetailsScreen extends StatelessWidget {
           'Ticket Details',
           style: TextStyle(
             color: Colors.black,
-            fontSize: 20,
+            fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -49,19 +49,19 @@ class TicketDetailsScreen extends StatelessWidget {
                         Text(
                           ticket.ticketId,
                           style: const TextStyle(
-                            fontSize: 24,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                             color: Colors.black,
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          _formatDate(ticket.createdAt),
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
+                          Text(
+                            _formatDate(ticket.createdAt),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.black.withOpacity(0.6),
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -71,7 +71,7 @@ class TicketDetailsScreen extends StatelessWidget {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: greenColor,
+                      color: blackColor,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: const Row(
@@ -179,14 +179,14 @@ class TicketDetailsScreen extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: greenColor.withOpacity(0.1),
+                        color: blackColor.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
                         children: [
                           Icon(
                             Icons.access_time,
-                            color: greenColor,
+                            color: blackColor,
                             size: 24,
                           ),
                           const SizedBox(width: 12),
@@ -198,7 +198,7 @@ class TicketDetailsScreen extends StatelessWidget {
                                   'Work Time',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey[600],
+                                    color: Colors.black.withOpacity(0.6),
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -206,9 +206,9 @@ class TicketDetailsScreen extends StatelessWidget {
                                 Text(
                                   ticket.workTime!.calculatedFormattedTime,
                                   style: TextStyle(
-                                    fontSize: 20,
+                                    fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: greenColor,
+                                    color: blackColor,
                                   ),
                                 ),
                               ],
@@ -365,7 +365,7 @@ class TicketDetailsScreen extends StatelessWidget {
           Text(
             title,
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.bold,
               color: Colors.black,
             ),

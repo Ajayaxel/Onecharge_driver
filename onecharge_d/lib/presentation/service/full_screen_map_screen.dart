@@ -444,36 +444,57 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
         'waze://?ll=$lat,$lng&navigate=yes',
       );
       
-      // Try Waze app first
-      if (await launchUrl(wazeUrl, mode: LaunchMode.externalApplication)) {
-        return;
+      // Try Waze app first - catch exception if app is not installed
+      try {
+        if (await launchUrl(wazeUrl, mode: LaunchMode.externalApplication)) {
+          return;
+        }
+      } catch (e) {
+        // Waze app not installed, try web version or fallback
       }
       
       // Fallback to Waze web if app is not installed
-      final wazeWebUrl = Uri.parse(
-        'https://waze.com/ul?ll=$lat,$lng&navigate=yes',
-      );
-      
-      if (await launchUrl(wazeWebUrl, mode: LaunchMode.externalApplication)) {
-        return;
+      try {
+        final wazeWebUrl = Uri.parse(
+          'https://waze.com/ul?ll=$lat,$lng&navigate=yes',
+        );
+        if (await launchUrl(wazeWebUrl, mode: LaunchMode.externalApplication)) {
+          return;
+        }
+      } catch (e) {
+        // Waze web also failed, fall through to alternative navigation apps
       }
       
+      // If Waze is not available, fallback to Google Maps
       if (mounted) {
+        // Show a brief message and open with Google Maps
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Unable to open Waze'),
-            backgroundColor: Colors.red,
+            content: Text('Waze is not installed. Opening with Google Maps...'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
           ),
         );
+        
+        // Try Google Maps as fallback
+        await Future.delayed(const Duration(milliseconds: 500));
+        await _openGoogleMaps(latitude, longitude, location);
       }
     } catch (e) {
+      // If all else fails, try Google Maps
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error opening Waze: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        try {
+          await _openGoogleMaps(latitude, longitude, location);
+        } catch (fallbackError) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Unable to open navigation apps. Please install Waze or Google Maps.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       }
     }
   }

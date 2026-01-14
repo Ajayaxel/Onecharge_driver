@@ -1,5 +1,6 @@
-package com.example.onecharge_d
+package com.onecharge.driver
 
 import io.flutter.embedding.android.FlutterActivity
 
 class MainActivity : FlutterActivity()
+

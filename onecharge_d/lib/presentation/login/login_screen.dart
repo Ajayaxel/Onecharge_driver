@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:onecharge_d/presentation/home/home_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:onecharge_d/presentation/main_navigation_screen.dart';
 import 'package:onecharge_d/presentation/login/bloc/login_bloc.dart';
 import 'package:onecharge_d/presentation/login/bloc/login_event.dart';
 import 'package:onecharge_d/presentation/login/bloc/login_state.dart';
@@ -19,6 +21,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _acceptTerms = false;
   bool _obscurePassword = true;
+  String? _emailError;
+  String? _passwordError;
 
   @override
   void dispose() {
@@ -27,21 +31,61 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  String? _validateEmail(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your email';
+    }
+    if (!value.contains('@')) {
+      return 'Please enter a valid email';
+    }
+    return null;
+  }
+
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your password';
+    }
+    if (value.length < 6) {
+      return 'Password must be at least 6 characters';
+    }
+    return null;
+  }
+
   void _handleLogin() {
-    if (_formKey.currentState!.validate() && _acceptTerms) {
-      context.read<LoginBloc>().add(
-            LoginSubmitted(
-              email: _emailController.text.trim(),
-              password: _passwordController.text,
-            ),
-          );
-    } else if (!_acceptTerms) {
+    setState(() {
+      _emailError = _validateEmail(_emailController.text);
+      _passwordError = _validatePassword(_passwordController.text);
+    });
+
+    if (_emailError != null || _passwordError != null) {
+      return;
+    }
+    
+    if (!_acceptTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please accept the terms and conditions'),
+          content: Text('Please accept the Privacy Policy and Terms of Service'),
           backgroundColor: Colors.red,
         ),
       );
+      return;
+    }
+    
+    // Both form validation and terms acceptance are valid, proceed with login
+    context.read<LoginBloc>().add(
+          LoginSubmitted(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          ),
+        );
+  }
+
+  Future<void> _launchPrivacyPolicy() async {
+    try {
+      final Uri privacyPolicyUri = Uri.parse('https://onecharge.io/privacy');
+      await launchUrl(privacyPolicyUri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      // Handle error silently or show a message
     }
   }
 
@@ -52,7 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (state is LoginSuccess) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
           );
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -99,83 +143,111 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 30),
                   // Email Field
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: TextFormField(
-                      controller: _emailController,
-                      decoration: const InputDecoration(
-                        hintText: 'Email',
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        hintStyle: TextStyle(
-                          color: Colors.grey,
-                          fontSize: 16,
-                        ),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        }
-                        if (!value.contains('@')) {
-                          return 'Please enter a valid email';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Password Field
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      decoration: InputDecoration(
-                        hintText: 'Password',
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
-                        ),
-                        hintStyle: const TextStyle(
-                          color: Colors.grey,
-                          fontSize: 16,
-                        ),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_off
-                                : Icons.visibility,
-                            color: Colors.grey,
+                        child: TextFormField(
+                          controller: _emailController,
+                          decoration: const InputDecoration(
+                            hintText: 'Email',
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
+                            hintStyle: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 16,
+                            ),
                           ),
-                          onPressed: () {
-                            setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            });
+                          keyboardType: TextInputType.emailAddress,
+                          onChanged: (value) {
+                            if (_emailError != null) {
+                              setState(() {
+                                _emailError = null;
+                              });
+                            }
                           },
                         ),
                       ),
-                      keyboardType: TextInputType.visiblePassword,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your password';
-                        }
-                        if (value.length < 6) {
-                          return 'Password must be at least 6 characters';
-                        }
-                        return null;
-                      },
-                    ),
+                      if (_emailError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0, left: 4.0),
+                          child: Text(
+                            _emailError!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Password Field
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: TextFormField(
+                          controller: _passwordController,
+                          obscureText: _obscurePassword,
+                          decoration: InputDecoration(
+                            hintText: 'Password',
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
+                            hintStyle: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 16,
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: Colors.grey,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                            ),
+                          ),
+                          keyboardType: TextInputType.visiblePassword,
+                          onChanged: (value) {
+                            if (_passwordError != null) {
+                              setState(() {
+                                _passwordError = null;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      if (_passwordError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0, left: 4.0),
+                          child: Text(
+                            _passwordError!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 24),
                   // Login Button
@@ -183,9 +255,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     builder: (context, state) {
                       return ReusableButton(
                         text: state is LoginLoading ? 'Logging in...' : 'Login',
-                        onPressed: (state is LoginLoading || !_acceptTerms)
-                            ? null
-                            : _handleLogin,
+                        onPressed: state is LoginLoading ? null : _handleLogin,
                       );
                     },
                   ),
@@ -208,21 +278,25 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Padding(
                           padding: const EdgeInsets.only(top: 12),
                           child: RichText(
-                            text: const TextSpan(
-                              style: TextStyle(
+                            text: TextSpan(
+                              style: const TextStyle(
                                 fontSize: 14,
                                 color: Colors.black,
                               ),
                               children: [
-                                TextSpan(text: 'By continuing, I accept the '),
+                                const TextSpan(text: 'By continuing, I accept the '),
                                 TextSpan(
                                   text: 'Privacy Policy',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontWeight: FontWeight.bold,
+                                    color: Colors.blue,
+                                    decoration: TextDecoration.underline,
                                   ),
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = _launchPrivacyPolicy,
                                 ),
-                                TextSpan(text: ' and '),
-                                TextSpan(
+                                const TextSpan(text: ' and '),
+                                const TextSpan(
                                   text: 'Terms of Service',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,

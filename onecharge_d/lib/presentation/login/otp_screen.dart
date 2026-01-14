@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:onecharge_d/presentation/home/home_screen.dart';
 import 'package:onecharge_d/presentation/service/service_request_screen.dart';
 import 'package:onecharge_d/widgets/reusable_button.dart';
 import 'dart:async';
@@ -117,7 +116,7 @@ class _OtpScreenState extends State<OtpScreen> {
                       'Please enter the verification\ncode sent to ${widget.phoneNumber}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontSize: 20,
+                        fontSize: 16,
                         color: Colors.black,
                         height: 1.5,
                       ),
@@ -165,7 +164,7 @@ class _OtpScreenState extends State<OtpScreen> {
                           'Didn\'t receive the code?',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey.shade600,
+                            color: Colors.black.withOpacity(0.6),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -173,7 +172,7 @@ class _OtpScreenState extends State<OtpScreen> {
                           _formatTime(_secondsRemaining),
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey.shade800,
+                            color: Colors.black,
                             fontWeight: FontWeight.w500,
                           ),
                         ),

@@ -44,23 +44,40 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
 
   Future<void> _pickImage(ImageSource source, {bool isAfterWork = false}) async {
     try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: source,
-        imageQuality: 85,
-      );
-      if (image != null) {
-        setState(() {
-          if (isAfterWork) {
-            _selectedAfterWorkFiles.add(image);
-          } else {
-            _selectedFiles.add(image);
-          }
-        });
+      if (source == ImageSource.gallery) {
+        // Use pickMultipleMedia for gallery to allow multiple selection
+        final List<XFile> images = await _imagePicker.pickMultipleMedia(
+          imageQuality: 85,
+        );
+        if (images.isNotEmpty) {
+          setState(() {
+            if (isAfterWork) {
+              _selectedAfterWorkFiles.addAll(images);
+            } else {
+              _selectedFiles.addAll(images);
+            }
+          });
+        }
+      } else {
+        // Use pickImage for camera (single selection)
+        final XFile? image = await _imagePicker.pickImage(
+          source: source,
+          imageQuality: 85,
+        );
+        if (image != null) {
+          setState(() {
+            if (isAfterWork) {
+              _selectedAfterWorkFiles.add(image);
+            } else {
+              _selectedFiles.add(image);
+            }
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
+          SnackBar(content: Text('Error picking images: $e')),
         );
       }
     }
@@ -250,7 +267,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                 const Center(child: Text(
                   'Select Navigation App',
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.black,
                   ),
@@ -446,36 +463,57 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
         'waze://?ll=$lat,$lng&navigate=yes',
       );
       
-      // Try Waze app first
-      if (await launchUrl(wazeUrl, mode: LaunchMode.externalApplication)) {
-        return;
+      // Try Waze app first - catch exception if app is not installed
+      try {
+        if (await launchUrl(wazeUrl, mode: LaunchMode.externalApplication)) {
+          return;
+        }
+      } catch (e) {
+        // Waze app not installed, try web version or fallback
       }
       
       // Fallback to Waze web if app is not installed
-      final wazeWebUrl = Uri.parse(
-        'https://waze.com/ul?ll=$lat,$lng&navigate=yes',
-      );
-      
-      if (await launchUrl(wazeWebUrl, mode: LaunchMode.externalApplication)) {
-        return;
+      try {
+        final wazeWebUrl = Uri.parse(
+          'https://waze.com/ul?ll=$lat,$lng&navigate=yes',
+        );
+        if (await launchUrl(wazeWebUrl, mode: LaunchMode.externalApplication)) {
+          return;
+        }
+      } catch (e) {
+        // Waze web also failed, fall through to alternative navigation apps
       }
       
+      // If Waze is not available, fallback to Google Maps
       if (mounted) {
+        // Show a brief message and open with Google Maps
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Unable to open Waze'),
-            backgroundColor: Colors.red,
+            content: Text('Waze is not installed. Opening with Google Maps...'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
           ),
         );
+        
+        // Try Google Maps as fallback
+        await Future.delayed(const Duration(milliseconds: 500));
+        await _openGoogleMaps(latitude, longitude, location);
       }
     } catch (e) {
+      // If all else fails, try Google Maps
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error opening Waze: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        try {
+          await _openGoogleMaps(latitude, longitude, location);
+        } catch (fallbackError) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Unable to open navigation apps. Please install Waze or Google Maps.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       }
     }
   }
@@ -644,22 +682,81 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
               }
 
               if (state is TicketLoaded) {
-              final tickets = state.tickets;
+              // Show only tickets that still need work; completed ones should not appear here.
+              final pendingTickets = state.tickets
+                  .where((t) => t.status.toLowerCase() != 'completed')
+                  .toList();
               
-              if (tickets.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'No tickets available',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.black,
-                    ),
+              if (pendingTickets.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.black,
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                          const Expanded(
+                            child: Center(
+                              child: Text(
+                                'Incoming Service Request',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.normal,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 48),
+                        ],
+                      ),
+                      const SizedBox(height: 40),
+                      const Expanded(
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.assignment_outlined,
+                                size: 72,
+                                color: Colors.black54,
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                'No tickets available',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'You have no incoming requests right now.',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black54,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }
 
-              // Use the first ticket for display
-              final ticket = tickets[0];
+              // Use the first pending ticket for display
+              final ticket = pendingTickets[0];
               final statusLower = ticket.status.toLowerCase();
               
               // Reset the flags if status is "active" or "in_progress" (work has already started)
@@ -682,15 +779,32 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      const Center(
-                        child: Text(
-                          'Incoming Service Request ',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.normal,
-                            color: Colors.black,
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.black,
+                            ),
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                            },
                           ),
-                        ),
+                          const Expanded(
+                            child: Center(
+                              child: Text(
+                                'Incoming Service Request ',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.normal,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Add empty space to balance the back button
+                          const SizedBox(width: 48),
+                        ],
                       ),
                       const SizedBox(height: 20),
                       SizedBox(
@@ -730,7 +844,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                           label: const Text(
                             'See Routes',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Colors.white,
                             ),
@@ -748,7 +862,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                       const Text(
                         "Issue Type",
                         style: TextStyle(
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.normal,
                           color: Colors.black,
                         ),
@@ -767,7 +881,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                   const Text(
                                     "Issue Type",
                                     style: TextStyle(
-                                      fontSize: 20,
+                                      fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.black,
                                     ),
@@ -777,7 +891,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                   Text(
                                     ticket.issueCategory.name,
                                     style: const TextStyle(
-                                      fontSize: 14,
+                                      fontSize: 13,
                                       fontWeight: FontWeight.normal,
                                       color: Colors.black,
                                       height: 1.4,
@@ -788,7 +902,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                     Text(
                                       ticket.description!,
                                       style: const TextStyle(
-                                        fontSize: 14,
+                                        fontSize: 13,
                                         fontWeight: FontWeight.normal,
                                         color: Colors.black,
                                         height: 1.4,
@@ -869,7 +983,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                       const Text(
                         "Customer Notes & Media",
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: 14,
                           fontWeight: FontWeight.normal,
                           color: Colors.black,
                         ),
@@ -901,7 +1015,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                 Text(
                                   ticket.description!,
                                   style: const TextStyle(
-                                    fontSize: 14,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.normal,
                                     color: Colors.black,
                                     height: 1.4,
@@ -980,7 +1094,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                         const Text(
                           "Vehicle Documentation",
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 16,
                             fontWeight: FontWeight.normal,
                             color: Colors.black,
                           ),
@@ -1026,7 +1140,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                   child: Text(
                                     "Please upload photos or videos of the vehicle before starting the work.",
                                     style: TextStyle(
-                                      fontSize: 14,
+                                      fontSize: 13,
                                       fontWeight: FontWeight.w500,
                                       color: Colors.grey[800],
                                       height: 1.5,
@@ -1067,7 +1181,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                             Text(
                                               'Add Photo',
                                               style: TextStyle(
-                                                fontSize: 15,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                                 color: Colors.black,
                                               ),
@@ -1107,7 +1221,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                             Text(
                                               'Add Video',
                                               style: TextStyle(
-                                                fontSize: 15,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                                 color: Colors.black,
                                               ),
@@ -1128,7 +1242,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                   const Text(
                                     'Selected Media',
                                     style: TextStyle(
-                                      fontSize: 15,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.black,
                                     ),
@@ -1290,7 +1404,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                                 Text(
                                                   'Uploading...',
                                                   style: TextStyle(
-                                                    fontSize: 16,
+                                                    fontSize: 14,
                                                     fontWeight: FontWeight.bold,
                                                     color: Colors.white,
                                                   ),
@@ -1300,7 +1414,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                           : const Text(
                                               'Upload Attachments',
                                               style: TextStyle(
-                                                fontSize: 16,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.bold,
                                                 color: Colors.white,
                                               ),
@@ -1320,7 +1434,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                         const Text(
                           "Completed Work Documentation",
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 16,
                             fontWeight: FontWeight.normal,
                             color: Colors.black,
                           ),
@@ -1366,7 +1480,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                     child: Text(
                                       "Please upload photos or videos of the completed work. After uploading, click the Complete Work button to finish the job.",
                                       style: TextStyle(
-                                        fontSize: 14,
+                                        fontSize: 13,
                                         fontWeight: FontWeight.w500,
                                         color: Colors.grey[800],
                                         height: 1.5,
@@ -1407,7 +1521,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                               Text(
                                                 'Add Photo',
                                                 style: TextStyle(
-                                                  fontSize: 15,
+                                                  fontSize: 14,
                                                   fontWeight: FontWeight.w600,
                                                   color: Colors.black,
                                                 ),
@@ -1447,7 +1561,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                               Text(
                                                 'Add Video',
                                                 style: TextStyle(
-                                                  fontSize: 15,
+                                                  fontSize: 14,
                                                   fontWeight: FontWeight.w600,
                                                   color: Colors.black,
                                                 ),
@@ -1468,7 +1582,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                     const Text(
                                       'Selected Media',
                                       style: TextStyle(
-                                        fontSize: 15,
+                                        fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.black,
                                       ),
@@ -1630,7 +1744,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                                   Text(
                                                     'Uploading...',
                                                     style: TextStyle(
-                                                      fontSize: 16,
+                                                      fontSize: 14,
                                                       fontWeight: FontWeight.bold,
                                                       color: Colors.white,
                                                     ),
@@ -1640,7 +1754,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                             : const Text(
                                                 'Upload Completed Work',
                                                 style: TextStyle(
-                                                  fontSize: 16,
+                                                  fontSize: 14,
                                                   fontWeight: FontWeight.bold,
                                                   color: Colors.white,
                                                 ),
@@ -1707,7 +1821,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                           Text(
                                             'Starting...',
                                             style: TextStyle(
-                                              fontSize: 16,
+                                              fontSize: 14,
                                               fontWeight: FontWeight.bold,
                                               color: Colors.white,
                                             ),
@@ -1717,7 +1831,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                     : Text(
                                         _startWorkSuccess ? 'Completed' : 'Start',
                                         style: const TextStyle(
-                                          fontSize: 16,
+                                          fontSize: 14,
                                           fontWeight: FontWeight.bold,
                                           color: Colors.white,
                                         ),
@@ -1788,7 +1902,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                             Text(
                                               "Completing...",
                                               style: TextStyle(
-                                                fontSize: 16,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.bold,
                                                 color: Colors.white,
                                               ),
@@ -1798,7 +1912,7 @@ class _ServiceRequestScreenState extends State<ServiceRequestScreen> {
                                       : const Text(
                                           "I completed my work",
                                           style: TextStyle(
-                                            fontSize: 16,
+                                            fontSize: 14,
                                             fontWeight: FontWeight.bold,
                                             color: Colors.white,
                                           ),

@@ -3,6 +3,7 @@ class Driver {
   final String name;
   final String email;
   final String phone;
+  final String? licenseNumber;
   final String? profileImage;
   final String createdAt;
   final String updatedAt;
@@ -12,6 +13,7 @@ class Driver {
     required this.name,
     required this.email,
     required this.phone,
+    this.licenseNumber,
     this.profileImage,
     required this.createdAt,
     required this.updatedAt,
@@ -23,6 +25,7 @@ class Driver {
       name: json['name'] ?? '',
       email: json['email'] ?? '',
       phone: json['phone'] ?? '',
+      licenseNumber: json['license_number'],
       profileImage: json['profile_image'],
       createdAt: json['created_at'] ?? '',
       updatedAt: json['updated_at'] ?? '',
@@ -35,6 +38,7 @@ class Driver {
       'name': name,
       'email': email,
       'phone': phone,
+      'license_number': licenseNumber,
       'profile_image': profileImage,
       'created_at': createdAt,
       'updated_at': updatedAt,
