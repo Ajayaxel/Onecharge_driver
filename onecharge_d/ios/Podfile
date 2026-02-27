@@ -43,4 +43,12 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
     end
   end
+
+  # Fix GoogleMaps script permissions to prevent "bad interpreter: Operation not permitted" error
+  # This error is caused by macOS quarantine attribute on the script file.
+  google_maps_script = File.join(__dir__, 'Pods', 'Target Support Files', 'GoogleMaps', 'GoogleMaps-xcframeworks.sh')
+  if File.exist?(google_maps_script)
+    system("xattr -d com.apple.quarantine \"#{google_maps_script}\" 2>/dev/null; chmod +x \"#{google_maps_script}\"")
+    puts "✅ Fixed GoogleMaps-xcframeworks.sh permissions (removed quarantine + chmod +x)"
+  end
 end
