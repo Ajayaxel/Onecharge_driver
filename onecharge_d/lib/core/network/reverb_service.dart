@@ -6,6 +6,7 @@ import 'package:web_socket_channel/io.dart';
 import 'package:http/http.dart' as http;
 import '../../config/app_config.dart';
 import '../storage/auth_storage.dart';
+import 'api_constants.dart';
 
 class ReverbService {
   static final ReverbService _instance = ReverbService._internal();
@@ -263,15 +264,74 @@ class ReverbService {
     _eventListeners.putIfAbsent(event, () => []).add(callback);
   }
 
-  void sendLocationUpdate(double latitude, double longitude) {
-    if (_rawChannel == null || _subscribedChannel == null) return;
-    _rawChannel!.sink.add(
-      jsonEncode({
-        'event': 'client-driver-location',
-        'channel': _subscribedChannel,
-        'data': {'latitude': latitude, 'longitude': longitude},
-      }),
-    );
+  /// Sends the driver's real-time GPS position to the backend via HTTP POST.
+  ///
+  /// The backend at POST /api/driver/location/update:
+  ///   1. Updates the driver's `latitude`, `longitude`, and `last_location_updated_at`
+  ///      in the database — this is what makes the customer app's freshness check pass.
+  ///   2. Broadcasts `driver.location.updated` on the correct customer private channel
+  ///      (`private-customer.{customerId}.driver-location`) so the customer map
+  ///      updates in real time.
+  ///
+  /// We also fire a low-latency WebSocket client event on the public
+  /// `driver-locations` channel so other drivers on the same home map can
+  /// see each other move (the previous functionality).
+  Future<void> sendLocationUpdate(double latitude, double longitude) async {
+    // 1. HTTP POST → updates DB + triggers correct backend broadcast
+    try {
+      final token = _currentToken ?? await AuthStorage.getToken();
+      if (token != null) {
+        final response = await _httpClient
+            .post(
+              Uri.parse(ApiConstants.updateLocation),
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': 'Bearer $token',
+              },
+              body: jsonEncode({
+                'latitude': latitude,
+                'longitude': longitude,
+                'timestamp': DateTime.now().toUtc().toIso8601String(),
+              }),
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          print(
+            '📍 [ReverbService] Location updated via API ✅ '
+            '(lat=$latitude, lng=$longitude)',
+          );
+        } else {
+          print(
+            '⚠️ [ReverbService] Location API returned ${response.statusCode}: '
+            '${response.body}',
+          );
+        }
+      }
+    } catch (e) {
+      print('⚠️ [ReverbService] Location HTTP update failed: $e');
+    }
+
+    // 2. WebSocket client event on the public driver-locations channel
+    //    (peer visibility on the driver home map — best effort).
+    //    Note: _subscribedChannel is the private tickets channel; we intentionally
+    //    broadcast to the public 'driver-locations' channel here instead.
+    if (_rawChannel != null) {
+      try {
+        print(
+          '🔌 [ReverbService] Sending WS location event '
+          '(tickets channel: $_subscribedChannel)',
+        );
+        _rawChannel!.sink.add(
+          jsonEncode({
+            'event': 'client-driver-location',
+            'channel': 'driver-locations',
+            'data': {'latitude': latitude, 'longitude': longitude},
+          }),
+        );
+      } catch (_) {}
+    }
   }
 
   void disconnect() {

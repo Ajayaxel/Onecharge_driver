@@ -52,6 +52,8 @@ class _HomeTabState extends State<HomeTab> {
   String _locationAddress = 'Fetching location...';
   StreamSubscription<Position>? _positionStream;
   Map<String, Marker> _otherDriversMarkers = {};
+  bool _hasCenteredOnDriver = false; // ensures we snap to driver on first fix
+  bool _mapTouched = false; // freezes outer scroll while user touches the map
 
   // Only these statuses are considered "active" and shown on the home screen
   static const List<String> _activeStatuses = [
@@ -116,16 +118,18 @@ class _HomeTabState extends State<HomeTab> {
     });
   }
 
-  // Throttle location updates to at most once per 10 seconds
+  // Throttle location updates to at most once per 5 seconds.
+  // Using HTTP POST (not raw socket) so the backend updates
+  // `last_location_updated_at` and broadcasts to the correct customer channel.
   DateTime? _lastLocationUpdateTime;
 
   void _sendLocationUpdateToSocket(Position position) {
     final now = DateTime.now();
     if (_lastLocationUpdateTime == null ||
-        now.difference(_lastLocationUpdateTime!) >
-            const Duration(seconds: 10)) {
-      ReverbService().sendLocationUpdate(position.latitude, position.longitude);
+        now.difference(_lastLocationUpdateTime!) > const Duration(seconds: 5)) {
       _lastLocationUpdateTime = now;
+      // Fire-and-forget — errors are logged inside sendLocationUpdate.
+      ReverbService().sendLocationUpdate(position.latitude, position.longitude);
     }
   }
 
@@ -181,10 +185,14 @@ class _HomeTabState extends State<HomeTab> {
               print('Error fetching address: $e');
             }
 
-            if (_mapController != null) {
+            if (_mapController != null && !_hasCenteredOnDriver) {
+              _hasCenteredOnDriver = true;
               _mapController!.animateCamera(
-                CameraUpdate.newLatLng(
-                  LatLng(position.latitude, position.longitude),
+                CameraUpdate.newCameraPosition(
+                  CameraPosition(
+                    target: LatLng(position.latitude, position.longitude),
+                    zoom: 15,
+                  ),
                 ),
               );
             }
@@ -244,7 +252,7 @@ class _HomeTabState extends State<HomeTab> {
     } else {
       if (mounted) {
         setState(() {
-          _locationAddress = 'Vandipetta, Vellayil, Kozhikode';
+          _locationAddress = 'Location unavailable';
         });
       }
     }
@@ -303,15 +311,6 @@ class _HomeTabState extends State<HomeTab> {
           infoWindow: const InfoWindow(title: 'Customer Location'),
         ),
       );
-    } else {
-      // Mock markers for browsing (keep original ones for now or clear)
-      newMarkers.addAll({
-        Marker(
-          markerId: const MarkerId('car1'),
-          position: const LatLng(51.545, -0.192),
-          icon: _customIcon ?? BitmapDescriptor.defaultMarker,
-        ),
-      });
     }
 
     setState(() {
@@ -682,30 +681,74 @@ class _HomeTabState extends State<HomeTab> {
             await Future.delayed(const Duration(seconds: 1));
           },
           child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: _mapTouched
+                ? const NeverScrollableScrollPhysics()
+                : const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Stack(
                   children: [
                     // 1. Google Map
-                    SizedBox(
-                      height: MediaQuery.of(context).size.height,
-                      width: MediaQuery.of(context).size.width,
-                      child: GoogleMap(
-                        initialCameraPosition: const CameraPosition(
-                          target: LatLng(51.545, -0.19),
-                          zoom: 14,
+                    Listener(
+                      onPointerDown: (_) {
+                        if (!_mapTouched) setState(() => _mapTouched = true);
+                      },
+                      onPointerUp: (_) {
+                        if (_mapTouched) setState(() => _mapTouched = false);
+                      },
+                      onPointerCancel: (_) {
+                        if (_mapTouched) setState(() => _mapTouched = false);
+                      },
+                      child: SizedBox(
+                        height: MediaQuery.of(context).size.height,
+                        width: MediaQuery.of(context).size.width,
+                        child: GoogleMap(
+                          scrollGesturesEnabled: true,
+                          zoomGesturesEnabled: true,
+                          rotateGesturesEnabled: true,
+                          tiltGesturesEnabled: true,
+                          initialCameraPosition: CameraPosition(
+                            target: _currentPosition != null
+                                ? LatLng(
+                                    _currentPosition!.latitude,
+                                    _currentPosition!.longitude,
+                                  )
+                                : const LatLng(0, 0),
+                            zoom: _currentPosition != null ? 14 : 2,
+                          ),
+                          markers: _markers,
+                          polylines: _polylines,
+                          myLocationEnabled: true,
+                          myLocationButtonEnabled: false,
+                          zoomControlsEnabled: false,
+                          mapType: MapType.normal,
+                          onMapCreated: (controller) {
+                            _mapController = controller;
+                            // If GPS already responded before the map was ready,
+                            // immediately jump to the driver's real location.
+                            if (_currentPosition != null) {
+                              Future.delayed(
+                                const Duration(milliseconds: 300),
+                                () {
+                                  if (mounted && _mapController != null) {
+                                    _mapController!.animateCamera(
+                                      CameraUpdate.newCameraPosition(
+                                        CameraPosition(
+                                          target: LatLng(
+                                            _currentPosition!.latitude,
+                                            _currentPosition!.longitude,
+                                          ),
+                                          zoom: 15,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              );
+                            }
+                          },
                         ),
-                        markers: _markers,
-                        polylines: _polylines,
-                        myLocationEnabled: true,
-                        myLocationButtonEnabled: false,
-                        zoomControlsEnabled: false,
-                        mapType: MapType.normal,
-                        onMapCreated: (controller) {
-                          _mapController = controller;
-                        },
                       ),
                     ),
 
