@@ -23,4 +23,7 @@ class ApiConstants {
   static String dropOffVehicle(int id) =>
       '$baseUrl/driver/vehicles/$id/drop-off';
   static const String updateLocation = '$baseUrl/driver/location/update';
+
+  // FCM
+  static const String saveFcmToken = '$baseUrl/driver/fcm-token';
 }

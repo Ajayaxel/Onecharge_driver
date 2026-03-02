@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 
 class SuccessBottomSheet extends StatelessWidget {
-  const SuccessBottomSheet({super.key});
+  final VoidCallback? onDone;
+  const SuccessBottomSheet({super.key, this.onDone});
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +64,7 @@ class SuccessBottomSheet extends StatelessWidget {
           GestureDetector(
             onTap: () {
               Navigator.pop(context); // Close success sheet
+              if (onDone != null) onDone!();
             },
             child: Container(
               width: double.infinity,
@@ -90,12 +92,12 @@ class SuccessBottomSheet extends StatelessWidget {
     );
   }
 
-  static void show(BuildContext context) {
+  static void show(BuildContext context, {VoidCallback? onDone}) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => const SuccessBottomSheet(),
+      builder: (context) => SuccessBottomSheet(onDone: onDone),
     );
   }
 }

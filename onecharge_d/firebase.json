@@ -1,0 +1,41 @@
+{
+    "flutter": {
+        "platforms": {
+            "android": {
+                "default": {
+                    "projectId": "onechargedriver",
+                    "appId": "1:68174174052:android:6201a26f02069abd03cc71",
+                    "fileOutput": "android/app/google-services.json"
+                }
+            },
+            "ios": {
+                "default": {
+                    "projectId": "onechargedriver",
+                    "appId": "1:68174174052:ios:258ebe962cedd69b03cc71",
+                    "uploadDebugSymbols": false,
+                    "fileOutput": "ios/Runner/GoogleService-Info.plist"
+                }
+            },
+            "macos": {
+                "default": {
+                    "projectId": "onechargedriver",
+                    "appId": "1:68174174052:ios:7ca7b8c9be9c129803cc71",
+                    "uploadDebugSymbols": false,
+                    "fileOutput": "macos/Runner/GoogleService-Info.plist"
+                }
+            },
+            "dart": {
+                "lib/firebase_options.dart": {
+                    "projectId": "onechargedriver",
+                    "configurations": {
+                        "android": "1:68174174052:android:6201a26f02069abd03cc71",
+                        "ios": "1:68174174052:ios:258ebe962cedd69b03cc71",
+                        "macos": "1:68174174052:ios:7ca7b8c9be9c129803cc71",
+                        "web": "1:68174174052:web:c31c34b00495103d03cc71",
+                        "windows": "1:68174174052:web:285e42afc64c1fb403cc71"
+                    }
+                }
+            }
+        }
+    }
+}

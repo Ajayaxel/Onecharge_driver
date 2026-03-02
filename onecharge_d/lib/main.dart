@@ -1,7 +1,9 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:onecharge_d/core/network/api_service.dart';
 import 'package:onecharge_d/data/repositories/vehicle_repository.dart';
+import 'package:onecharge_d/firebase_options.dart';
 import 'package:onecharge_d/logic/blocs/auth/auth_bloc.dart';
 import 'package:onecharge_d/logic/blocs/auth/auth_event.dart';
 import 'package:onecharge_d/logic/blocs/auth/auth_state.dart';
@@ -15,9 +17,16 @@ import 'package:onecharge_d/screens/home/bootmnav.dart';
 import 'package:onecharge_d/screens/login/login_screen.dart';
 import 'package:onecharge_d/widgets/platform_loading.dart';
 import 'package:onecharge_d/core/network/reverb_service.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:onecharge_d/core/services/notification_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Register FCM background message handler
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
   runApp(const MyApp());
 }
 
@@ -61,6 +70,8 @@ class MyApp extends StatelessWidget {
           home: BlocListener<AuthBloc, AuthState>(
             listener: (context, state) {
               if (state is AuthAuthenticated) {
+                // Initialize FCM Push Notifications
+                NotificationService().initialize();
                 // Initialize Reverb real-time service
                 final reverb = ReverbService();
                 reverb.initialize().then((_) {
@@ -96,7 +107,7 @@ class MyApp extends StatelessWidget {
                   UpdateDriverLocal(state.userData),
                 );
                 context.read<DriverBloc>().add(FetchDriverProfile());
-                // context.read<TicketBloc>().add(FetchTickets()); // STOPPED TEMPORARILY FOR SOCKET TEST
+                context.read<TicketBloc>().add(FetchTickets());
                 context.read<VehicleBloc>()
                   ..add(const FetchVehicles())
                   ..add(const FetchCurrentVehicle());

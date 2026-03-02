@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "68174174052",
+    "project_id": "onechargedriver",
+    "storage_bucket": "onechargedriver.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:68174174052:android:6201a26f02069abd03cc71",
+        "android_client_info": {
+          "package_name": "com.onecharge.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD5R4G5auJKr2dF_YA9ehTwipfVjVmSlbc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

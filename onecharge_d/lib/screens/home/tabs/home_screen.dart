@@ -359,6 +359,31 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
+  void _cleanupMap() {
+    if (!mounted) return;
+    setState(() {
+      _markers.clear();
+      _polylines.clear();
+      _beforeImages = [];
+      _afterImages = [];
+    });
+    _updateMarkers();
+
+    if (_currentPosition != null && _mapController != null) {
+      _mapController!.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(
+              _currentPosition!.latitude,
+              _currentPosition!.longitude,
+            ),
+            zoom: 15,
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _openMapsOption(LatLng destination) async {
     final lat = destination.latitude;
     final lng = destination.longitude;
@@ -533,6 +558,8 @@ class _HomeTabState extends State<HomeTab> {
             setState(() {
               _isAccepted = true;
               _isAccepting = false;
+              _beforeImages = [];
+              _afterImages = [];
             });
             if (state.tickets.isNotEmpty) {
               final ticket = state.tickets.first;
@@ -598,7 +625,14 @@ class _HomeTabState extends State<HomeTab> {
                 _isWorkStarted = false;
               });
               widget.onSheetToggle(true);
-              SuccessBottomSheet.show(context);
+              SuccessBottomSheet.show(
+                context,
+                onDone: () {
+                  _cleanupMap();
+                  context.read<TicketBloc>().add(FetchTickets());
+                  context.read<DriverBloc>().add(FetchDriverProfile());
+                },
+              );
             }
           } else if (state is TicketAttachmentUploadError) {
             CustomToast.show(
@@ -630,6 +664,11 @@ class _HomeTabState extends State<HomeTab> {
                 _updateMarkers(destination: dest);
                 _drawRoute(dest);
 
+                if (status == 'offered') {
+                  _beforeImages = [];
+                  _afterImages = [];
+                }
+
                 // 'offered' = driver must swipe to accept
                 _isAccepted = (status != 'offered');
 
@@ -644,9 +683,9 @@ class _HomeTabState extends State<HomeTab> {
                 _isSheetOpen = false;
                 _isAccepted = false;
                 _isWorkStarted = false;
-                _markers.clear();
-                _polylines.clear();
+                _dragPosition = 0;
               });
+              _cleanupMap();
               widget.onSheetToggle(true);
             }
           } else if (state is TicketRejecting) {
@@ -659,9 +698,8 @@ class _HomeTabState extends State<HomeTab> {
               _isSheetOpen = false;
               _isAccepted = false;
               _isWorkStarted = false;
-              _markers.clear();
-              _polylines.clear();
             });
+            _cleanupMap();
             widget.onSheetToggle(true);
           } else if (state is TicketRejectError) {
             CustomToast.show(

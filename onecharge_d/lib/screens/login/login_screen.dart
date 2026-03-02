@@ -54,9 +54,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final topPadding = MediaQuery.paddingOf(context).top;
+    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
+    final isKeyboardVisible = keyboardHeight > 0;
+
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
-        statusBarColor: Colors.black,
+        statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
         systemNavigationBarColor: Colors.black,
         systemNavigationBarIconBrightness: Brightness.light,
@@ -66,59 +73,41 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
-          final topPadding = MediaQuery.of(context).padding.top;
-          final isKeyboardVisible = keyboardHeight > 0;
-
-          return Column(
+      body: Stack(
+        children: [
+          // Background/Top Section
+          Column(
             children: [
-              SizedBox(height: topPadding),
-              if (!isKeyboardVisible)
-                Expanded(
-                  flex: 1,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 70),
-                      Center(
-                        child: Image.asset(
-                          'images/logo/onechargelogo.png',
-                          fit: BoxFit.contain,
-                          color: Colors.white,
-                          height: 40,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text(
-                        "Electric vehicle charging\nstation for everyone.\nDiscover. Charge. Pay.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'Lufga',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: Center(
-                          child: Image.asset(
-                            'images/logo/carimage.png',
-                            fit: BoxFit.contain,
-                            width: double.infinity,
-                            alignment: Alignment.bottomCenter,
-                          ),
-                        ),
-                      ),
-                    ],
+              SizedBox(height: topPadding + size.height * 0.05),
+              if (!isKeyboardVisible) ...[
+                Center(
+                  child: Image.asset(
+                    'images/logo/onechargelogo.png',
+                    fit: BoxFit.contain,
+                    color: Colors.white,
+                    height: size.height * 0.045,
                   ),
-                )
-              else
+                ),
+                SizedBox(height: size.height * 0.02),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    "Electric vehicle charging\nstation for everyone.\nDiscover. Charge. Pay.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: size.height * 0.024,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'Lufga',
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+              ] else ...[
                 // Small top section when keyboard is visible
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 35),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Center(
                     child: Image.asset(
                       'images/logo/onechargelogo.png',
@@ -128,137 +117,187 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
-              Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
+                const Spacer(),
+              ],
+            ],
+          ),
+
+          // Login Form Section (Bottom Sheet style)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                if (!isKeyboardVisible)
+                  Positioned(
+                    top:
+                        -size.height *
+                        0.16, // Adjusts image to sit on top of the sheet
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Image.asset(
+                        'images/logo/carimage.png',
+                        fit: BoxFit.contain,
+                        width: size.width * 0.95,
+                      ),
+                    ),
                   ),
-                  color: Colors.white,
-                ),
-                child: SingleChildScrollView(
-                  physics: isKeyboardVisible
-                      ? const BouncingScrollPhysics()
-                      : const NeverScrollableScrollPhysics(),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  width: size.width,
                   padding: EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    top: 20,
-                    bottom: isKeyboardVisible ? keyboardHeight + 20 : 30,
+                    bottom: isKeyboardVisible ? keyboardHeight : bottomPadding,
                   ),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Login",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            fontFamily: 'Lufga',
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          "Enter your email and password to proceed",
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w400,
-                            color: Colors.black54,
-                            fontFamily: 'Lufga',
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        TextFormField(
-                          controller: _emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: _buildInputDecoration(
-                            'Enter your email',
-                            Icons.email_outlined,
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please enter your email';
-                            if (!value.contains('@'))
-                              return 'Please enter a valid email';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          decoration: _buildInputDecoration(
-                            'Enter your password',
-                            Icons.lock_outline,
-                            isPassword: true,
-                            obscureText: _obscurePassword,
-                            onToggleVisibility: () => setState(
-                              () => _obscurePassword = !_obscurePassword,
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please enter your password';
-                            if (value.length < 6)
-                              return 'Password must be at least 6 characters';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
+                  decoration: const BoxDecoration(
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(30),
+                      topRight: Radius.circular(30),
+                    ),
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 10,
+                        offset: Offset(0, -5),
+                      ),
+                    ],
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: size.height * (isKeyboardVisible ? 0.9 : 0.65),
+                    ),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(24, 30, 24, 32),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Checkbox(
-                              activeColor: Colors.black,
-                              value: _isChecked,
-                              onChanged: (value) =>
-                                  setState(() => _isChecked = value ?? false),
-                            ),
-                            const Flexible(
-                              child: Text(
-                                "I accept the Privacy Policy and Terms of Service",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.black54,
-                                  fontFamily: 'Lufga',
-                                ),
+                            const Text(
+                              "Login",
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w600,
+                                fontFamily: 'Lufga',
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              "Enter your email and password to proceed",
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400,
+                                color: Colors.black54,
+                                fontFamily: 'Lufga',
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            TextFormField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              style: const TextStyle(fontFamily: 'Lufga'),
+                              decoration: _buildInputDecoration(
+                                'Enter your email',
+                                Icons.email_outlined,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty)
+                                  return 'Please enter your email';
+                                if (!value.contains('@'))
+                                  return 'Please enter a valid email';
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              style: const TextStyle(fontFamily: 'Lufga'),
+                              decoration: _buildInputDecoration(
+                                'Enter your password',
+                                Icons.lock_outline,
+                                isPassword: true,
+                                obscureText: _obscurePassword,
+                                onToggleVisibility: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty)
+                                  return 'Please enter your password';
+                                if (value.length < 6)
+                                  return 'Password must be at least 6 characters';
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: Checkbox(
+                                    activeColor: Colors.black,
+                                    value: _isChecked,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    onChanged: (value) => setState(
+                                      () => _isChecked = value ?? false,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Flexible(
+                                  child: Text(
+                                    "I accept the Privacy Policy and Terms of Service",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.black54,
+                                      fontFamily: 'Lufga',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                            BlocConsumer<AuthBloc, AuthState>(
+                              listener: (context, state) {
+                                if (state is AuthAuthenticated) {
+                                  CustomToast.show(context, state.message);
+                                } else if (state is AuthError) {
+                                  CustomToast.show(
+                                    context,
+                                    state.message,
+                                    isError: true,
+                                  );
+                                }
+                              },
+                              builder: (context, state) {
+                                return OneBtn(
+                                  text: "Login",
+                                  onPressed: _handleLogin,
+                                  isLoading: state is AuthLoading,
+                                );
+                              },
+                            ),
+                            SizedBox(height: isKeyboardVisible ? 20 : 0),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        BlocConsumer<AuthBloc, AuthState>(
-                          listener: (context, state) {
-                            if (state is AuthAuthenticated) {
-                              CustomToast.show(context, state.message);
-                            } else if (state is AuthError) {
-                              CustomToast.show(
-                                context,
-                                state.message,
-                                isError: true,
-                              );
-                            }
-                          },
-                          builder: (context, state) {
-                            return OneBtn(
-                              text: "Login",
-                              onPressed: _handleLogin,
-                              isLoading: state is AuthLoading,
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -272,34 +311,47 @@ class _LoginScreenState extends State<LoginScreen> {
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xffB8B9BD), fontFamily: 'Lufga'),
-      prefixIcon: Icon(icon),
+      prefixIcon: Icon(icon, color: Colors.black54, size: 20),
+      hintStyle: const TextStyle(
+        color: Color(0xffB8B9BD),
+        fontFamily: 'Lufga',
+        fontSize: 14,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       suffixIcon: isPassword
           ? IconButton(
               icon: Icon(
                 obscureText
                     ? Icons.visibility_outlined
                     : Icons.visibility_off_outlined,
+                color: Colors.black54,
+                size: 20,
               ),
               onPressed: onToggleVisibility,
             )
           : null,
       border: OutlineInputBorder(
         borderSide: const BorderSide(color: Color(0xffE4E4E4)),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
       ),
       enabledBorder: OutlineInputBorder(
         borderSide: const BorderSide(color: Color(0xffE4E4E4)),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
       ),
       focusedBorder: OutlineInputBorder(
-        borderSide: const BorderSide(color: Colors.black),
-        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Colors.black, width: 1.5),
+        borderRadius: BorderRadius.circular(12),
       ),
       errorBorder: OutlineInputBorder(
         borderSide: const BorderSide(color: Colors.red),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
       ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderSide: const BorderSide(color: Colors.red, width: 1.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      filled: true,
+      fillColor: Colors.white,
     );
   }
 }
