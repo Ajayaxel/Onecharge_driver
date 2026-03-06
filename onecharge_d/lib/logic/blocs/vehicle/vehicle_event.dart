@@ -55,3 +55,7 @@ class DropOffVehicle extends VehicleEvent {
   @override
   List<Object?> get props => [vehicleId, latitude, longitude, imagePaths];
 }
+
+class ClearVehicles extends VehicleEvent {
+  const ClearVehicles();
+}

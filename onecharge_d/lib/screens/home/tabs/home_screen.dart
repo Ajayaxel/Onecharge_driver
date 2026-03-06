@@ -52,6 +52,7 @@ class _HomeTabState extends State<HomeTab> {
   String _locationAddress = 'Fetching location...';
   StreamSubscription<Position>? _positionStream;
   Map<String, Marker> _otherDriversMarkers = {};
+  LatLng? _destination;
   bool _hasCenteredOnDriver = false; // ensures we snap to driver on first fix
   bool _mapTouched = false; // freezes outer scroll while user touches the map
 
@@ -78,10 +79,12 @@ class _HomeTabState extends State<HomeTab> {
     // duplicate call every time the home tab rebuilds.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      // final ticketState = context.read<TicketBloc>().state;
-      // if (ticketState is! TicketLoaded) {
-      //   context.read<TicketBloc>().add(FetchTickets());
-      // }
+
+      // Check if ticket is already loaded (e.g. on app restart when Auth is fast)
+      final ticketState = context.read<TicketBloc>().state;
+      if (ticketState is TicketLoaded) {
+        _handleTicketLoaded(ticketState.tickets);
+      }
     });
     _initRealTimeListeners();
   }
@@ -197,6 +200,9 @@ class _HomeTabState extends State<HomeTab> {
               );
             }
             _updateMarkers();
+            if (_destination != null) {
+              _drawRoute(_destination!);
+            }
             _sendLocationUpdateToSocket(position);
           }
         });
@@ -282,6 +288,12 @@ class _HomeTabState extends State<HomeTab> {
 
   void _updateMarkers({LatLng? destination}) {
     if (!mounted) return;
+
+    // Persist destination if provided
+    if (destination != null) {
+      _destination = destination;
+    }
+
     Set<Marker> newMarkers = {};
 
     // Driver's current position
@@ -299,12 +311,13 @@ class _HomeTabState extends State<HomeTab> {
       );
     }
 
-    // If we have a destination (accepted ticket)
-    if (destination != null) {
+    // If we have a destination (from arg or from state)
+    final LatLng? target = destination ?? _destination;
+    if (target != null) {
       newMarkers.add(
         Marker(
           markerId: const MarkerId('customer'),
-          position: destination,
+          position: target,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             BitmapDescriptor.hueAzure,
           ),
@@ -320,6 +333,7 @@ class _HomeTabState extends State<HomeTab> {
 
   void _drawRoute(LatLng destination) {
     if (!mounted || _currentPosition == null) return;
+    _destination = destination;
 
     setState(() {
       _polylines = {
@@ -327,10 +341,13 @@ class _HomeTabState extends State<HomeTab> {
           polylineId: const PolylineId('route'),
           points: [
             LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-            destination,
+            _destination!,
           ],
-          color: Colors.black,
+          color: const Color(0xFF007AFF), // Premium Blue
           width: 5,
+          jointType: JointType.round,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
         ),
       };
     });
@@ -364,6 +381,7 @@ class _HomeTabState extends State<HomeTab> {
     setState(() {
       _markers.clear();
       _polylines.clear();
+      _destination = null;
       _beforeImages = [];
       _afterImages = [];
     });
@@ -576,6 +594,15 @@ class _HomeTabState extends State<HomeTab> {
               _dragPosition = 0;
               _isAccepted = false;
               _isAccepting = false;
+
+              // If accept fails and no active tickets are left, hide the sheet
+              final activeTickets = state.tickets
+                  .where((t) => _isActiveTicket(t.status))
+                  .toList();
+              if (activeTickets.isEmpty) {
+                _isSheetOpen = false;
+                widget.onSheetToggle(true);
+              }
             });
           } else if (state is TicketWorkStarted) {
             // ✅ StartWork API confirmed — NOW show Work in Progress
@@ -623,12 +650,13 @@ class _HomeTabState extends State<HomeTab> {
                 _isSheetOpen = false;
                 _isAccepted = false;
                 _isWorkStarted = false;
+                _dragPosition = 0; // Reset slider
               });
+              _cleanupMap();
               widget.onSheetToggle(true);
               SuccessBottomSheet.show(
                 context,
                 onDone: () {
-                  _cleanupMap();
                   context.read<TicketBloc>().add(FetchTickets());
                   context.read<DriverBloc>().add(FetchDriverProfile());
                 },
@@ -641,53 +669,33 @@ class _HomeTabState extends State<HomeTab> {
               isError: true,
               alignRight: true,
             );
-          } else if (state is TicketLoaded) {
-            // If we are currently in the middle of an Accept API call,
-            // ignore the background polling results so the UI doesn't flicker/reset.
-            if (_isAccepting) return;
-
-            // Base class — only reached for plain FetchTickets responses
+          } else if (state is TicketOffered) {
+            // New ticket offer received via WebSocket
             final activeTickets = state.tickets
                 .where((t) => _isActiveTicket(t.status))
                 .toList();
 
+            // If driver is currently working on something else, show a notification toast
             if (activeTickets.isNotEmpty) {
-              final ticket = activeTickets.first;
-              final dest = LatLng(
-                double.parse(ticket.latitude),
-                double.parse(ticket.longitude),
-              );
-              final status = ticket.status.toLowerCase();
-
-              setState(() {
-                _isSheetOpen = true;
-                _updateMarkers(destination: dest);
-                _drawRoute(dest);
-
-                if (status == 'offered') {
-                  _beforeImages = [];
-                  _afterImages = [];
-                }
-
-                // 'offered' = driver must swipe to accept
-                _isAccepted = (status != 'offered');
-
-                // Work started ONLY when the backend confirms in_progress/working
-                // Do NOT use beforeWorkAttachments.isNotEmpty here — that caused
-                // _isWorkStarted to flip true before StartWork API completed.
-                _isWorkStarted = ['in_progress', 'working'].contains(status);
-              });
-              widget.onSheetToggle(false);
-            } else {
-              setState(() {
-                _isSheetOpen = false;
-                _isAccepted = false;
-                _isWorkStarted = false;
-                _dragPosition = 0;
-              });
-              _cleanupMap();
-              widget.onSheetToggle(true);
+              final topTicket = activeTickets.first;
+              final status = topTicket.status.toLowerCase();
+              if ([
+                    'working',
+                    'in_progress',
+                    'accepted',
+                    'on_the_way',
+                  ].contains(status) &&
+                  topTicket.id != state.ticket.id) {
+                CustomToast.show(
+                  context,
+                  'New job offered: ${state.ticket.ticketId}. Finish current task to view.',
+                  alignRight: true,
+                );
+              }
             }
+            _handleTicketLoaded(state.tickets);
+          } else if (state is TicketLoaded) {
+            _handleTicketLoaded(state.tickets);
           } else if (state is TicketRejecting) {
             // Loading spinner is shown inside the sheet button
           } else if (state is TicketRejected) {
@@ -710,6 +718,25 @@ class _HomeTabState extends State<HomeTab> {
             );
           } else if (state is TicketError) {
             CustomToast.show(context, state.message, isError: true);
+            setState(() {
+              _isSheetOpen = false;
+              _isAccepted = false;
+              _isWorkStarted = false;
+            });
+            _cleanupMap();
+            widget.onSheetToggle(true);
+          } else if (state is TicketInitial || state is TicketLoading) {
+            // When starting fresh or loading, ensure we don't have a ghost sheet
+            // if we are not already in a known state.
+            if (state is TicketInitial) {
+              setState(() {
+                _isSheetOpen = false;
+                _isAccepted = false;
+                _isWorkStarted = false;
+              });
+              _cleanupMap();
+              widget.onSheetToggle(true);
+            }
           }
         },
         child: RefreshIndicator(
@@ -929,19 +956,33 @@ class _HomeTabState extends State<HomeTab> {
 
                     // 3. Close Button (Animated)
                     AnimatedPositioned(
-                      duration: const Duration(seconds: 2),
+                      duration: const Duration(milliseconds: 400),
                       curve: Curves.easeInOut,
                       bottom: _isSheetOpen ? 390 : -80,
                       left: 0,
                       right: 0,
 
                       child: AnimatedOpacity(
-                        duration: const Duration(seconds: 2),
+                        duration: const Duration(milliseconds: 400),
                         curve: Curves.easeInOut,
                         opacity: _isSheetOpen ? 1.0 : 0.0,
                         child: Center(
                           child: BlocBuilder<TicketBloc, TicketState>(
                             builder: (context, state) {
+                              // Ensure X is only visible if there's actually an active ticket
+                              bool hasActive = false;
+                              if (state is TicketLoaded) {
+                                hasActive = state.tickets.any(
+                                  (t) => _isActiveTicket(t.status),
+                                );
+                              }
+
+                              if (!hasActive && _isSheetOpen) {
+                                // Double safety: if we show X but no ticket, something is desynced.
+                                // Don't show it.
+                                return const SizedBox.shrink();
+                              }
+
                               return GestureDetector(
                                 onTap: () {
                                   if (state is TicketLoaded &&
@@ -987,7 +1028,7 @@ class _HomeTabState extends State<HomeTab> {
                     ),
 
                     AnimatedPositioned(
-                      duration: const Duration(seconds: 2),
+                      duration: const Duration(milliseconds: 400),
                       curve: Curves.easeInOut,
                       bottom: _isSheetOpen ? 15 : -800,
                       left: 15,
@@ -1634,6 +1675,61 @@ class _HomeTabState extends State<HomeTab> {
       default:
         return Colors.white70;
     }
+  }
+
+  void _handleTicketLoaded(List<TicketModel> tickets) {
+    if (!mounted) return;
+
+    final activeTickets = tickets
+        .where((t) => _isActiveTicket(t.status))
+        .toList();
+
+    // ─── CRITICAL: If no active tickets, ALWAYS close and reset ───
+    if (activeTickets.isEmpty) {
+      setState(() {
+        _isSheetOpen = false;
+        _isAccepted = false;
+        _isWorkStarted = false;
+        _isAccepting = false;
+        _dragPosition = 0;
+      });
+      _cleanupMap();
+      widget.onSheetToggle(true);
+      return;
+    }
+
+    // If we are currently in the middle of an Accept API call,
+    // ignore the results so the UI doesn't flicker/reset.
+    if (_isAccepting) return;
+
+    final ticket = activeTickets.first;
+    final dest = LatLng(
+      double.parse(ticket.latitude),
+      double.parse(ticket.longitude),
+    );
+    final status = ticket.status.toLowerCase();
+
+    setState(() {
+      _isSheetOpen = true;
+      _updateMarkers(destination: dest);
+      _drawRoute(dest);
+
+      if (status == 'offered') {
+        _beforeImages = [];
+        _afterImages = [];
+      }
+
+      bool wasOffered = !_isAccepted;
+      _isAccepted = (status != 'offered');
+      _isWorkStarted = ['in_progress', 'working'].contains(status);
+
+      // If we just moved from one ticket to another, or if the status changed
+      // from offered to accepted, reset the drag position.
+      if (_isAccepted && wasOffered) {
+        _dragPosition = 0;
+      }
+    });
+    widget.onSheetToggle(false);
   }
 
   void _showRejectSheet(String ticketId) {

@@ -41,7 +41,7 @@ class _BootmnavState extends State<Bootmnav> {
             ],
           ),
           AnimatedPositioned(
-            duration: const Duration(seconds: 2),
+            duration: const Duration(milliseconds: 400),
             curve: Curves.easeInOut,
             bottom: _isBottomNavVisible ? 0 : -250,
             left: 0,

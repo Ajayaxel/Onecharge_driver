@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/network/api_service.dart';
@@ -9,11 +10,19 @@ import 'auth_state.dart';
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final ApiService _apiService;
+  StreamSubscription? _reverbAuthSubscription;
 
   AuthBloc(this._apiService) : super(AuthInitial()) {
     on<LoginRequested>(_onLoginRequested);
     on<LogoutRequested>(_onLogoutRequested);
     on<AppStarted>(_onAppStarted);
+
+    // Auto-logout if Reverb auth fails (401)
+    _reverbAuthSubscription = ReverbService().authFailures.listen((_) {
+      if (state is AuthAuthenticated) {
+        add(LogoutRequested());
+      }
+    });
   }
 
   Future<void> _onLoginRequested(
@@ -95,5 +104,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     } else {
       emit(AuthUnauthenticated());
     }
+  }
+
+  @override
+  Future<void> close() {
+    _reverbAuthSubscription?.cancel();
+    return super.close();
   }
 }

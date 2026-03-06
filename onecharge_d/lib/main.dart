@@ -19,6 +19,7 @@ import 'package:onecharge_d/widgets/platform_loading.dart';
 import 'package:onecharge_d/core/network/reverb_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:onecharge_d/core/services/notification_service.dart';
+import 'package:pusher_reverb_flutter/pusher_reverb_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -99,6 +100,20 @@ class MyApp extends StatelessWidget {
                       );
                     }
                   });
+
+                  // ─── CRITICAL: Re-fetch tickets when socket subscribes ───
+                  // This handles the user request "fetch all tickets from socket/ready state"
+                  // by ensuring the API is checked exactly when the real-time pipe is ready.
+                  reverb.ticketsChannelState.addListener(() {
+                    if (reverb.ticketsChannelState.value ==
+                            ChannelState.subscribed &&
+                        context.mounted) {
+                      print(
+                        'Reverb: 🎯 Channel subscribed, refreshing tickets...',
+                      );
+                      context.read<TicketBloc>().add(FetchTickets());
+                    }
+                  });
                 });
 
                 // If we have user data from login/storage, initialize DriverBloc with it
@@ -111,6 +126,13 @@ class MyApp extends StatelessWidget {
                 context.read<VehicleBloc>()
                   ..add(const FetchVehicles())
                   ..add(const FetchCurrentVehicle());
+              } else if (state is AuthUnauthenticated) {
+                // Clear all internal data Blocs so a new login starts with a fresh state.
+                // This prevents the "Offered Ticket" modal from flash-showing old data
+                // from the previous session before the new FetchTickets call finishes.
+                context.read<TicketBloc>().add(ClearTickets());
+                context.read<DriverBloc>().add(ClearDriverData());
+                context.read<VehicleBloc>().add(const ClearVehicles());
               }
             },
             child: BlocBuilder<AuthBloc, AuthState>(

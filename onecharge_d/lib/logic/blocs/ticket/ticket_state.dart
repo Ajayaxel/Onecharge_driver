@@ -21,6 +21,14 @@ class TicketLoaded extends TicketState {
   List<Object?> get props => [tickets];
 }
 
+class TicketOffered extends TicketLoaded {
+  final TicketModel ticket;
+  const TicketOffered(super.tickets, this.ticket);
+
+  @override
+  List<Object?> get props => [super.tickets, ticket];
+}
+
 class TicketError extends TicketState {
   final String message;
 

@@ -16,6 +16,7 @@ class VehicleBloc extends Bloc<VehicleEvent, VehicleState> {
     on<FetchCurrentVehicle>(_onFetchCurrentVehicle, transformer: concurrent());
     on<SelectVehicle>(_onSelectVehicle, transformer: droppable());
     on<DropOffVehicle>(_onDropOffVehicle, transformer: droppable());
+    on<ClearVehicles>((event, emit) => emit(VehicleState.initial()));
   }
 
   // ─── Fetch page 1 (reset) ──────────────────────────────────────────────────

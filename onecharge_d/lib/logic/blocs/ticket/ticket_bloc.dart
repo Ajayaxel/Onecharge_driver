@@ -13,15 +13,13 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
   final ApiService _apiService;
 
   TicketBloc(this._apiService) : super(TicketInitial()) {
-    // sequential() ensures FetchTickets calls never run in parallel —
-    // if one is already running, the next one waits for it to finish.
-    // This prevents duplicate HTTP requests from RealTime events + initState.
     on<FetchTickets>(_onFetchTickets, transformer: sequential());
     on<AcceptTicket>(_onAcceptTicket, transformer: droppable());
     on<UploadAttachments>(_onUploadAttachments, transformer: droppable());
     on<FetchHistory>(_onFetchHistory, transformer: droppable());
     on<RejectTicket>(_onRejectTicket, transformer: droppable());
     on<RealTimeTicketUpdate>(_onRealTimeTicketUpdate);
+    on<ClearTickets>((event, emit) => emit(TicketInitial()));
   }
 
   Future<void> _onRealTimeTicketUpdate(
@@ -31,31 +29,47 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
     print('TicketBloc: [RealTime] Status: ${event.eventName}');
     print('TicketBloc: [RealTime] Data: ${jsonEncode(event.data)}');
 
+    final bool isOfferedEvent =
+        event.eventName == 'offered' || event.eventName == 'ticket.offered';
+
+    // Handle nested ticket object if present
+    final Map<String, dynamic> ticketData = event.data.containsKey('ticket')
+        ? event.data['ticket']
+        : event.data;
+
+    int ticketId = ticketData['ticket_id'] is int
+        ? ticketData['ticket_id']
+        : int.tryParse(ticketData['ticket_id']?.toString() ?? '0') ?? 0;
+
     if (event.eventName == 'cancelled' ||
-        event.eventName == 'ticket.cancelled') {
-      print('TicketBloc: [RealTime] Ticket cancelled, clearing UI.');
-      emit(const TicketLoaded([]));
+        event.eventName == 'ticket.cancelled' ||
+        event.eventName == 'deleted') {
+      print('TicketBloc: [RealTime] Ticket $ticketId cancelled/deleted.');
+      if (state is TicketLoaded) {
+        final List<TicketModel> currentTickets = List.from(
+          (state as TicketLoaded).tickets,
+        );
+        currentTickets.removeWhere(
+          (t) =>
+              t.id == ticketId ||
+              t.ticketId == ticketId.toString() ||
+              t.id.toString() == ticketId.toString(),
+        );
+        emit(TicketLoaded(currentTickets));
+      }
       return;
     }
 
     try {
-      // Handle nested ticket object if present
-      final Map<String, dynamic> ticketData = event.data.containsKey('ticket')
-          ? event.data['ticket']
-          : event.data;
-
       // Ensure we have current tickets list to check against
       List<TicketModel> currentTickets = [];
       if (state is TicketLoaded) {
         currentTickets = List.from((state as TicketLoaded).tickets);
       }
 
-      int ticketId = ticketData['ticket_id'] is int
-          ? ticketData['ticket_id']
-          : int.tryParse(ticketData['ticket_id']?.toString() ?? '0') ?? 0;
       String newStatus = ticketData['status']?.toString() ?? '';
 
-      // 1. If we already have the ticket loaded, just update it in place
+      // 1. Find if ticket exists
       int index = currentTickets.indexWhere(
         (t) =>
             t.id == ticketId ||
@@ -63,40 +77,60 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
             t.id.toString() == ticketId.toString(),
       );
 
+      // 2. If it exists and we have a status update
       if (index != -1 && newStatus.isNotEmpty) {
-        currentTickets[index] = currentTickets[index].copyWith(
-          status: newStatus,
-          latitude:
-              ticketData['latitude']?.toString() ??
-              currentTickets[index].latitude,
-          longitude:
-              ticketData['longitude']?.toString() ??
-              currentTickets[index].longitude,
-          location:
-              ticketData['location']?.toString() ??
-              currentTickets[index].location,
-          description:
-              ticketData['message']?.toString() ??
-              currentTickets[index].description,
-        );
+        final List<TicketModel> updatedList = List.from(currentTickets);
+        final ticket = updatedList
+            .removeAt(index)
+            .copyWith(
+              status: newStatus,
+              latitude:
+                  (!ticketData.containsKey('driver_id') &&
+                      ticketData.containsKey('latitude'))
+                  ? ticketData['latitude'].toString()
+                  : currentTickets[index].latitude,
+              longitude:
+                  (!ticketData.containsKey('driver_id') &&
+                      ticketData.containsKey('longitude'))
+                  ? ticketData['longitude'].toString()
+                  : currentTickets[index].longitude,
+              location:
+                  ticketData['location']?.toString() ??
+                  currentTickets[index].location,
+              description:
+                  ticketData['message']?.toString() ??
+                  currentTickets[index].description,
+              updatedAt: DateTime.now(),
+            );
+
+        updatedList.add(ticket); // Add back to list, sorting will fix position
+
+        // Sort by Priority first, then by updatedAt descending
+        updatedList.sort((a, b) {
+          final pA = _getStatusPriority(a.status);
+          final pB = _getStatusPriority(b.status);
+          if (pA != pB) return pB.compareTo(pA);
+          return b.updatedAt.compareTo(a.updatedAt);
+        });
+
         print(
-          'TicketBloc: [RealTime] 🔄 Updated existing ticket $ticketId status to $newStatus',
+          'TicketBloc: [RealTime] 🔄 Updated ticket $ticketId status to $newStatus',
         );
-        emit(TicketLoaded(currentTickets));
+
+        if (isOfferedEvent || newStatus.toLowerCase() == 'offered') {
+          emit(TicketOffered(updatedList, ticket));
+        } else {
+          emit(TicketLoaded(updatedList));
+        }
         return;
       }
 
-      // Check if data is partial (missing required UI fields like customer or number_plate)
+      // 3. Handle partial data or new tickets
       final bool isPartial =
           !ticketData.containsKey('customer') ||
           !ticketData.containsKey('number_plate');
 
       if (isPartial) {
-        // Create new from partial data securely WITHOUT calling API
-        print(
-          'TicketBloc: [RealTime] Partial data detected. Building model dynamically...',
-        );
-
         String ticketRef =
             ticketData['ticket_reference']?.toString() ?? ticketId.toString();
 
@@ -137,32 +171,45 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
           currentTickets[index] = newTicket;
         }
 
-        print('-----------------------------------------');
-        print('🚀 NEW REALTIME TICKET CONSTRUCTED');
-        print('-----------------------------------------');
-        emit(TicketLoaded(currentTickets));
+        // Sort by Priority first, then by updatedAt descending
+        currentTickets.sort((a, b) {
+          final pA = _getStatusPriority(a.status);
+          final pB = _getStatusPriority(b.status);
+          if (pA != pB) return pB.compareTo(pA);
+          return b.updatedAt.compareTo(a.updatedAt);
+        });
+
+        if (isOfferedEvent) {
+          emit(TicketOffered(currentTickets, newTicket));
+        } else {
+          emit(TicketLoaded(currentTickets));
+        }
         return;
       }
 
-      // 3. Fallback for completely valid payload
+      // 4. Fallback for completely valid payload
       final ticket = TicketModel.fromJson(ticketData);
-      print('-----------------------------------------');
-      print('🚀 TICKET STATUS: ${ticket.status.toUpperCase()}');
-      print('🆔 TICKET ID: ${ticket.ticketId}');
-      print('-----------------------------------------');
-
       if (index != -1) {
         currentTickets[index] = ticket;
       } else {
         currentTickets.insert(0, ticket);
       }
 
-      // Emit loaded state with the new ticket from socket
-      emit(TicketLoaded(currentTickets));
+      // Sort by Priority first, then by updatedAt descending
+      currentTickets.sort((a, b) {
+        final pA = _getStatusPriority(a.status);
+        final pB = _getStatusPriority(b.status);
+        if (pA != pB) return pB.compareTo(pA);
+        return b.updatedAt.compareTo(a.updatedAt);
+      });
+
+      if (isOfferedEvent) {
+        emit(TicketOffered(currentTickets, ticket));
+      } else {
+        emit(TicketLoaded(currentTickets));
+      }
     } catch (e) {
-      print(
-        'TicketBloc: [RealTime] ❌ Parse Error: $e. Ignoring to prevent UI disruption.',
-      );
+      print('TicketBloc: [RealTime] ❌ Error: $e');
     }
   }
 
@@ -188,9 +235,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         files.add(await http.MultipartFile.fromPath('attachments[]', path));
       }
 
-      print('Calling Upload Attachments API at: ${DateTime.now()}');
-      print('Attachment Type: ${event.type}');
-
       final response = await _apiService.postMultipart(
         ApiConstants.uploadAttachments(event.ticketId),
         {
@@ -201,7 +245,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         token: token,
       );
 
-      print('Upload Attachments API Response: ${response.body}');
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
@@ -222,7 +265,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         );
       }
     } catch (e) {
-      print('Upload Attachments Error: $e');
       emit(
         TicketAttachmentUploadError(
           tickets,
@@ -250,11 +292,10 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
 
       final response = await _apiService.post(
         ApiConstants.acceptTicket(event.ticketId),
-        {}, // Empty body for accept POST
+        {},
         token: token,
       );
 
-      print('Accept Ticket API Response: ${response.body}');
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
@@ -264,7 +305,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
             data['message'] ?? 'Ticket accepted successfully',
           ),
         );
-        // Refresh tickets after acceptance
         add(FetchTickets());
       } else {
         emit(
@@ -286,7 +326,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
     Emitter<TicketState> emit,
   ) async {
     final currentState = state;
-    // Avoid emitting loading if already loading — prevents shimmer flicker
     if (currentState is! TicketLoaded && currentState is! TicketLoading) {
       emit(TicketLoading());
     }
@@ -308,12 +347,20 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         final tickets = ticketsJson
             .map((json) => TicketModel.fromJson(json))
             .toList();
+
+        // Sort by Priority first, then by updatedAt descending
+        tickets.sort((a, b) {
+          final pA = _getStatusPriority(a.status);
+          final pB = _getStatusPriority(b.status);
+          if (pA != pB) return pB.compareTo(pA);
+          return b.updatedAt.compareTo(a.updatedAt);
+        });
+
         emit(TicketLoaded(tickets));
       } else {
         emit(TicketError(data['message'] ?? 'Failed to fetch tickets'));
       }
     } catch (e) {
-      // On timeout or network error, keep existing data if available
       if (state is! TicketLoaded) {
         emit(const TicketError('Network error. Please check your connection.'));
       }
@@ -327,23 +374,16 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
     final currentState = state;
     bool isRefresh = event.isRefresh;
 
-    // 1. Super Fast API Calling: Fetch data only when necessary
     if (!isRefresh && currentState is TicketHistoryLoaded) {
-      // If we already have data and it's not a refresh, don't re-fetch unless we're paginating
-      // In this simple implementation, we check if we've reached max or if we just want to avoid re-fetching
       if (currentState.hasReachedMax) return;
-      // If you want to implement true pagination, you'd check scroll position or a specific 'LoadMore' event.
-      // For now, let's allow re-fetch if explicitly requested or if it's the first time.
       return;
     }
 
-    // Determine current tickets to maintain state during loading
     List<TicketModel> currentTickets = [];
     if (currentState is TicketHistoryLoaded && !isRefresh) {
       currentTickets = currentState.tickets;
     }
 
-    // Emit loading state with old tickets to avoid UI jump (if not refresh)
     emit(
       TicketHistoryLoading(
         oldTickets: currentTickets,
@@ -358,11 +398,10 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         return;
       }
 
-      // 1. Parallel API calls to avoid blocking
       final outcomes = await Future.wait([
         _apiService
             .get(ApiConstants.getCompletedTickets, token: token)
-            .timeout(const Duration(seconds: 45)), // Proper timeouts
+            .timeout(const Duration(seconds: 45)),
         _apiService
             .get(ApiConstants.getRejectedTickets, token: token)
             .timeout(const Duration(seconds: 45)),
@@ -378,7 +417,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         final data = jsonDecode(completedResponse.body);
         if (data['success'] == true) {
           final List<dynamic> ticketsJson = data['data']['tickets'];
-          // Use total_count from API if available
           totalCount +=
               (data['data']['total_count'] as num?)?.toInt() ??
               ticketsJson.length;
@@ -405,22 +443,16 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         }
       }
 
-      // Sort by date (newest first)
       allHistoryTickets.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      // 5. State Management Optimization: Emit only when changed or new data
       emit(
         TicketHistoryLoaded(
           tickets: allHistoryTickets,
-          hasReachedMax:
-              true, // For now, we fetch all. If true pagination is added, this would be dynamic.
+          hasReachedMax: true,
           totalCount: totalCount,
         ),
       );
     } catch (e) {
-      print('Fetch History Error: $e');
-      // If we had data, maybe we keep it and show an error toast instead?
-      // But requirement says keep it smooth.
       if (currentTickets.isNotEmpty) {
         emit(
           TicketHistoryLoaded(
@@ -462,7 +494,6 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         token: token,
       );
 
-      print('Reject Ticket API Response: ${response.body}');
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
@@ -482,10 +513,23 @@ class TicketBloc extends Bloc<TicketEvent, TicketState> {
         );
       }
     } catch (e) {
-      print('Reject Ticket Error: $e');
       emit(
         TicketRejectError(tickets, 'Network error. Failed to reject ticket.'),
       );
     }
+  }
+
+  // Define priority weights for statuses
+  // Working/In Progress > Accepted > Offered > Others
+  int _getStatusPriority(String status) {
+    status = status.toLowerCase();
+    if (status == 'working' || status == 'in_progress') return 3;
+    if (status == 'accepted' ||
+        status == 'on_the_way' ||
+        status == 'assigned') {
+      return 2;
+    }
+    if (status == 'offered') return 1;
+    return 0;
   }
 }

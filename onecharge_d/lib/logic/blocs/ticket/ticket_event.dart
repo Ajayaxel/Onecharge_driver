@@ -9,6 +9,8 @@ abstract class TicketEvent extends Equatable {
 
 class FetchTickets extends TicketEvent {}
 
+class ClearTickets extends TicketEvent {}
+
 class AcceptTicket extends TicketEvent {
   final String ticketId;
 

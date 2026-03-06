@@ -12,6 +12,7 @@ class DriverBloc extends Bloc<DriverEvent, DriverState> {
   DriverBloc(this._apiService) : super(DriverInitial()) {
     on<FetchDriverProfile>(_onFetchDriverProfile);
     on<UpdateDriverLocal>(_onUpdateDriverLocal);
+    on<ClearDriverData>((event, emit) => emit(DriverInitial()));
   }
 
   Future<void> _onFetchDriverProfile(

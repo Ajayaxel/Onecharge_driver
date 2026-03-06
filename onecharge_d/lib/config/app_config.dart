@@ -7,7 +7,10 @@ class AppConfig {
   static const String driverBroadcastingAuthUrl =
       'https://app.onecharge.io/api/driver/broadcasting/auth';
   // ----- Reverb (WebSocket only) -----
+  // production
   static const String reverbHost = 'one-charge-1-charge.up.railway.app';
+  // development
+  // static const String reverbHost = 'one-charge-1-charge-dev.up.railway.app';
   static const int reverbPort = 443;
   static const String reverbAppKey = '5csvb4sew88zqnmcxuqg';
   static const bool reverbUseTls = true;

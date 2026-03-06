@@ -14,3 +14,5 @@ class UpdateDriverLocal extends DriverEvent {
   @override
   List<Object?> get props => [driverData];
 }
+
+class ClearDriverData extends DriverEvent {}

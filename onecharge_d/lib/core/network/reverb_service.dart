@@ -20,6 +20,9 @@ class ReverbService {
   String? _currentToken;
   String? _subscribedChannel;
   Timer? _pingTimer;
+  final StreamController<void> _authFailureController =
+      StreamController<void>.broadcast();
+  Stream<void> get authFailures => _authFailureController.stream;
 
   // Event callbacks
   final Map<String, List<Function(dynamic)>> _eventListeners = {};
@@ -205,6 +208,9 @@ class ReverbService {
       } else {
         print('Reverb: ❌ Auth failed (${response.statusCode})');
         ticketsChannelState.value = ChannelState.unsubscribed;
+        if (response.statusCode == 401) {
+          _authFailureController.add(null);
+        }
       }
     } catch (e) {
       print('Reverb: ❌ Auth attempt $attempt failed: $e');
@@ -307,6 +313,9 @@ class ReverbService {
             '⚠️ [ReverbService] Location API returned ${response.statusCode}: '
             '${response.body}',
           );
+          if (response.statusCode == 401) {
+            _authFailureController.add(null);
+          }
         }
       }
     } catch (e) {
