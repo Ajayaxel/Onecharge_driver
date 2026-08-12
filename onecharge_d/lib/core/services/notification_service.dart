@@ -1,21 +1,43 @@
 import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:http/http.dart' as http;
-import '../network/api_constants.dart';
-import '../storage/auth_storage.dart';
 
 /// Top-level function required for background FCM messages.
 /// Must be a top-level function (not a class method).
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   print('🔔 [FCM] Background message received: ${message.messageId}');
-  print('🔔 [FCM] Title: ${message.notification?.title}');
-  print('🔔 [FCM] Body: ${message.notification?.body}');
-  // The notification is automatically displayed by the system when
-  // the message contains a 'notification' payload.
-  // No need to show local notification here — Android/iOS handles it.
+
+  final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+  // Initialize for the background isolate
+  const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: androidSettings);
+  await flutterLocalNotificationsPlugin.initialize(settings: initSettings);
+
+  final notification = message.notification;
+  final data = message.data;
+
+  if (notification == null && data.isNotEmpty) {
+    print('🔔 [FCM] Data-only background message. Showing manual alert.');
+    await flutterLocalNotificationsPlugin.show(
+      id: message.hashCode,
+      title: data['title'] ?? 'New Ticket Offered!',
+      body: data['body'] ?? 'You have a new ticket offer. Check the app.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'ticket_alerts',
+          'Ticket Alerts',
+          importance: Importance.max,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+          playSound: true,
+          enableVibration: true,
+        ),
+      ),
+      payload: jsonEncode(data),
+    );
+  }
 }
 
 class NotificationService {
@@ -35,7 +57,7 @@ class NotificationService {
         'ticket_alerts', // id
         'Ticket Alerts', // name
         description: 'Notifications for new ticket offers and updates',
-        importance: Importance.high,
+        importance: Importance.max, // Set to max for background popups
         playSound: true,
         enableVibration: true,
       );
@@ -102,13 +124,15 @@ class NotificationService {
       _onMessageOpenedApp(initialMessage);
     }
 
-    // 7. Get and save FCM token
-    await _getAndSaveToken();
+    // 7. Get FCM token
+    final token = await _messaging.getToken();
+    if (token != null) {
+      print('🔔 [FCM] Token: $token');
+    }
 
     // 8. Listen for token refresh
     _messaging.onTokenRefresh.listen((newToken) {
       print('🔔 [FCM] Token refreshed: $newToken');
-      _saveTokenToBackend(newToken);
     });
 
     _isInitialized = true;
@@ -119,33 +143,47 @@ class NotificationService {
   void _onForegroundMessage(RemoteMessage message) {
     print('🔔 [FCM] Foreground message: ${message.messageId}');
     final notification = message.notification;
-    final android = message.notification?.android;
 
     if (notification != null) {
-      _localNotifications.show(
+      showLocalNotification(
         id: notification.hashCode,
         title: notification.title ?? 'New Ticket',
         body: notification.body ?? 'You have a new ticket offer',
-        notificationDetails: NotificationDetails(
-          android: AndroidNotificationDetails(
-            _ticketChannel.id,
-            _ticketChannel.name,
-            channelDescription: _ticketChannel.description,
-            importance: Importance.high,
-            priority: Priority.high,
-            icon: android?.smallIcon ?? '@mipmap/ic_launcher',
-            playSound: true,
-            enableVibration: true,
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        ),
-        payload: jsonEncode(message.data),
+        data: message.data,
       );
     }
+  }
+
+  /// Manually show a local notification (e.g., from Reverb events)
+  void showLocalNotification({
+    required int id,
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+  }) {
+    _localNotifications.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          _ticketChannel.id,
+          _ticketChannel.name,
+          channelDescription: _ticketChannel.description,
+          importance: Importance.max,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+          playSound: true,
+          enableVibration: true,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
+      ),
+      payload: data != null ? jsonEncode(data) : null,
+    );
   }
 
   /// Handle notification tap when app is in background
@@ -160,55 +198,6 @@ class NotificationService {
   void _onNotificationTapped(NotificationResponse response) {
     print('🔔 [FCM] Local notification tapped: ${response.payload}');
     // Handle navigation based on payload if needed
-  }
-
-  /// Get FCM token and save to backend
-  Future<void> _getAndSaveToken() async {
-    try {
-      final token = await _messaging.getToken();
-      if (token != null) {
-        print('🔔 [FCM] Token: $token');
-        await _saveTokenToBackend(token);
-      }
-    } catch (e) {
-      print('🔔 [FCM] Error getting token: $e');
-    }
-  }
-
-  /// Save FCM token to the PHP backend
-  Future<void> _saveTokenToBackend(String fcmToken) async {
-    try {
-      final authToken = await AuthStorage.getToken();
-      if (authToken == null) {
-        print('🔔 [FCM] No auth token, skipping FCM token save.');
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse(ApiConstants.saveFcmToken),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $authToken',
-        },
-        body: jsonEncode({
-          'fcm_token': fcmToken,
-          'device_type': defaultTargetPlatform == TargetPlatform.iOS
-              ? 'ios'
-              : 'android',
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        print('🔔 [FCM] Token saved to backend ✅');
-      } else {
-        print(
-          '🔔 [FCM] Failed to save token: ${response.statusCode} ${response.body}',
-        );
-      }
-    } catch (e) {
-      print('🔔 [FCM] Error saving token to backend: $e');
-    }
   }
 
   /// Get current FCM token (for debugging)

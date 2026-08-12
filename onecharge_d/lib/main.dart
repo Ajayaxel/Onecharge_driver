@@ -19,6 +19,8 @@ import 'package:onecharge_d/widgets/platform_loading.dart';
 import 'package:onecharge_d/core/network/reverb_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:onecharge_d/core/services/notification_service.dart';
+import 'package:onecharge_d/logic/blocs/notification/notification_bloc.dart';
+import 'package:onecharge_d/logic/blocs/notification/notification_event.dart';
 import 'package:pusher_reverb_flutter/pusher_reverb_flutter.dart';
 
 void main() async {
@@ -58,6 +60,9 @@ class MyApp extends StatelessWidget {
           BlocProvider(
             create: (context) => VehicleBloc(context.read<VehicleRepository>()),
           ),
+          BlocProvider(
+            create: (context) => NotificationBloc(context.read<ApiService>()),
+          ),
         ],
         child: MaterialApp(
           title: 'Onecharge Driver',
@@ -71,14 +76,23 @@ class MyApp extends StatelessWidget {
           home: BlocListener<AuthBloc, AuthState>(
             listener: (context, state) {
               if (state is AuthAuthenticated) {
-                // Initialize FCM Push Notifications
-                NotificationService().initialize();
+                // Initialize FCM Push Notifications using BLoC as requested
+                context.read<NotificationBloc>().add(InitializeNotifications());
+
                 // Initialize Reverb real-time service
                 final reverb = ReverbService();
                 reverb.initialize().then((_) {
                   // Bind all ticket related events
                   reverb.bindTicketOffered((data) {
                     if (context.mounted) {
+                      // ─── NEW: Show a popup notification immediately on Reverb event ───
+                      NotificationService().showLocalNotification(
+                        id: 0,
+                        title: "New Ticket Offered!",
+                        body: data['message'] ?? "You have a new ticket offer.",
+                        data: data,
+                      );
+
                       context.read<TicketBloc>().add(
                         RealTimeTicketUpdate('offered', data),
                       );
